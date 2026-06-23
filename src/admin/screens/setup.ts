@@ -13,7 +13,46 @@ async function loginScreen(errorMsg = "") {
       : "") +
     "<div class='toolbar' style='justify-content:center'><button id='passkeyLoginBtn' style='min-width:220px'>" +
     escapeHtml(t("loginWithPasskey")) +
-    "</button></div></div></div></section>";
+    "</button></div>" +
+    "<div style='text-align:center;margin-top:14px'><a href='#' id='recoverLink' style='font-size:13px;color:var(--muted)'>" +
+    escapeHtml(t("lostDevice")) +
+    "</a></div>" +
+    "<form id='recoverForm' class='stack' style='display:none;margin-top:12px;gap:8px'><div class='muted' style='font-size:13px'>" +
+    escapeHtml(t("recoverRequestLead")) +
+    "</div><input id='recoverEmail' type='email' autocomplete='username' placeholder='admin@example.com' /><button type='submit'>" +
+    escapeHtml(t("recoverSendLink")) +
+    "</button><div id='recoverReqStatus'></div></form>" +
+    "</div></div></section>";
+  byId("recoverLink")?.addEventListener("click", (e: Dynamic) => {
+    e.preventDefault();
+    const form = byId("recoverForm");
+    if (form)
+      form.style.display = form.style.display === "none" ? "flex" : "none";
+  });
+  byId("recoverForm")?.addEventListener("submit", async (e: Dynamic) => {
+    e.preventDefault();
+    const btn = e.submitter || e.target.querySelector("button[type=submit]");
+    const email = (byId("recoverEmail")?.value || "").trim();
+    if (!email) return;
+    if (btn) btn.disabled = true;
+    try {
+      await api("/api/auth/recover/request", {
+        method: "POST",
+        body: JSON.stringify({ email }),
+      });
+      const st = byId("recoverReqStatus");
+      if (st)
+        st.innerHTML =
+          "<div class='notice'>" + escapeHtml(t("recoverSent")) + "</div>";
+    } catch (err) {
+      // Always show the same neutral message (no account enumeration).
+      const st = byId("recoverReqStatus");
+      if (st)
+        st.innerHTML =
+          "<div class='notice'>" + escapeHtml(t("recoverSent")) + "</div>";
+      void err;
+    }
+  });
   byId("passkeyLoginBtn")!.addEventListener("click", async () => {
     const btn = byId("passkeyLoginBtn");
     if (btn) btn.disabled = true;
@@ -109,6 +148,88 @@ async function inviteScreen(token: Dynamic) {
           btn.textContent = t("registerPasskey");
         }
         const st = byId("inviteStatus");
+        if (st)
+          st.innerHTML =
+            "<div class='notice error'>" +
+            escapeHtml(errorMessage(err) || t("apiFailed")) +
+            "</div>";
+      }
+    });
+  } catch (err) {
+    content.innerHTML =
+      "<div class='notice error'>" +
+      escapeHtml(errorMessage(err) || t("apiFailed")) +
+      "</div>";
+  }
+}
+
+// Recovery via emailed magic link: register a NEW passkey for an existing,
+// locked-out account. Mirrors inviteScreen but uses a recoveryToken.
+async function recoverScreen(token: Dynamic) {
+  setSidebarMode("setup");
+  app.innerHTML =
+    "<section class='setup'><div class='setupHero'><h2>" +
+    escapeHtml(t("recoverTitle")) +
+    "</h2></div><div class='setupLayout'><div class='stack panel' id='recoverContent'><p>" +
+    escapeHtml(t("loginLead")) +
+    "</p></div></div></section>";
+  const content = byId("recoverContent")!;
+  try {
+    const info = await api("/api/auth/recover/" + encodeURIComponent(token));
+    content.innerHTML =
+      "<p>" +
+      escapeHtml(t("recoverLead")) +
+      "</p><p><b>" +
+      escapeHtml(info.email) +
+      "</b></p><div class='toolbar' style='justify-content:center'><button id='recoverRegBtn' style='min-width:220px'>" +
+      escapeHtml(t("registerPasskey")) +
+      "</button></div><div id='recoverStatus'></div>";
+    byId("recoverRegBtn")!.addEventListener("click", async () => {
+      const btn = byId("recoverRegBtn");
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = t("registeringPasskey");
+      }
+      try {
+        const beginData = await api("/api/auth/passkey/register/begin", {
+          method: "POST",
+          body: JSON.stringify({ recoveryToken: token }),
+        });
+        const credential = await navigator.credentials.create({
+          publicKey: {
+            challenge: b64uDecode(beginData.challenge),
+            rp: beginData.rp,
+            user: {
+              id: b64uDecode(beginData.user.id),
+              name: beginData.user.name,
+              displayName: beginData.user.displayName,
+            },
+            pubKeyCredParams: beginData.pubKeyCredParams,
+            timeout: beginData.timeout,
+            attestation: beginData.attestation,
+            authenticatorSelection: beginData.authenticatorSelection,
+          },
+        });
+        await api("/api/auth/passkey/register/complete", {
+          method: "POST",
+          body: JSON.stringify({
+            challengeId: beginData.challengeId,
+            credential: serializeCredentialForRegistration(
+              credential as PublicKeyCredential,
+            ),
+            recoveryToken: token,
+          }),
+        });
+        const url = new URL(location.href);
+        url.searchParams.delete("recover");
+        history.replaceState(null, "", url.toString());
+        render();
+      } catch (err) {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = t("registerPasskey");
+        }
+        const st = byId("recoverStatus");
         if (st)
           st.innerHTML =
             "<div class='notice error'>" +

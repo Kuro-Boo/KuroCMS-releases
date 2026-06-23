@@ -56,7 +56,16 @@ async function profile() {
       escapeHtml(t("copy")) +
       "</button></div></div><div class='stack' style='gap:8px'><div class='tokenMeta'>" +
       escapeHtml(t("tokenHistory")) +
-      "</div><div id='tokenHistory' class='tokenList'></div></div></div></div></div>",
+      "</div><div id='tokenHistory' class='tokenList'></div></div></div>" +
+      // ── Passkey (device) management ──────────────────────────────────
+      "<div class='panel stack'><h3>" +
+      escapeHtml(t("passkeyDevices")) +
+      "</h3><p class='muted' style='margin:-4px 0 2px'>" +
+      escapeHtml(t("passkeyDevicesLead")) +
+      "</p><form class='toolbar' id='addPasskeyForm'><button>" +
+      escapeHtml(t("addPasskey")) +
+      "</button></form><div id='passkeyList' class='tokenList'></div></div>" +
+      "</div></div>",
   );
   byId("logoutBtn")?.addEventListener("click", async () => {
     try {
@@ -257,5 +266,176 @@ async function profile() {
       toast(errorMessage(error), true, revokeButton);
     }
   });
+  // ── Passkey (device) management ────────────────────────────────────────
+  async function loadPasskeys() {
+    const listEl = byId("passkeyList");
+    if (!listEl) return;
+    if (state.preview) {
+      listEl.innerHTML =
+        "<div class='tokenRow'><div><b>This device</b><div class='tokenMeta'>" +
+        formatDateTime(new Date().toISOString()) +
+        "</div></div></div>";
+      return;
+    }
+    const data = await api("/api/me/passkeys");
+    const items = data.passkeys || [];
+    listEl.innerHTML =
+      items
+        .map(function (pk: Dynamic) {
+          const meta =
+            escapeHtml(t("passkeyCreated")) +
+            " " +
+            escapeHtml(formatDateTime(pk.created_at)) +
+            (pk.last_used_at
+              ? " · " +
+                escapeHtml(t("passkeyLastUsed")) +
+                " " +
+                escapeHtml(formatDateTime(pk.last_used_at))
+              : "");
+          return (
+            "<div class='tokenRow'><div><b>" +
+            escapeHtml(pk.display_name || t("passkeyDevices")) +
+            "</b><div class='tokenMeta'>" +
+            meta +
+            "</div></div><div style='display:flex;gap:6px'>" +
+            "<button class='secondary' data-rename-passkey='" +
+            escapeHtml(pk.credential_id) +
+            "' data-name='" +
+            escapeHtml(pk.display_name || "") +
+            "'>&#9998; " +
+            escapeHtml(t("rename")) +
+            "</button><button class='danger' data-delete-passkey='" +
+            escapeHtml(pk.credential_id) +
+            "'>&#128465; " +
+            escapeHtml(t("delete")) +
+            "</button></div></div>"
+          );
+        })
+        .join("") ||
+      "<div class='tokenMeta'>" + escapeHtml(t("noDocuments")) + "</div>";
+  }
+
+  // Register a passkey for THIS device on the already-signed-in account.
+  async function addThisDevice(deviceName: string, btn: Dynamic) {
+    const beginData = await api("/api/auth/passkey/register/begin", {
+      method: "POST",
+      body: "{}",
+    });
+    const credential = await navigator.credentials.create({
+      publicKey: {
+        challenge: b64uDecode(beginData.challenge),
+        rp: beginData.rp,
+        user: {
+          id: b64uDecode(beginData.user.id),
+          name: beginData.user.name,
+          displayName: beginData.user.displayName,
+        },
+        pubKeyCredParams: beginData.pubKeyCredParams,
+        timeout: beginData.timeout,
+        attestation: beginData.attestation,
+        authenticatorSelection: beginData.authenticatorSelection,
+      },
+    });
+    await api("/api/auth/passkey/register/complete", {
+      method: "POST",
+      body: JSON.stringify({
+        challengeId: beginData.challengeId,
+        deviceName: deviceName,
+        credential: serializeCredentialForRegistration(
+          credential as PublicKeyCredential,
+        ),
+      }),
+    });
+    toast(t("passkeyAdded"), false, btn);
+    await loadPasskeys();
+  }
+
+  byId("addPasskeyForm")!.addEventListener("submit", function (event: Dynamic) {
+    event.preventDefault();
+    const btn =
+      event.submitter || event.target.querySelector("button[type=submit]");
+    if (state.preview) {
+      toast(t("previewReadOnly"), false, btn);
+      return;
+    }
+    openEntryDialog(
+      t("addPasskey"),
+      "<label>" +
+        escapeHtml(t("passkeyNameLabel")) +
+        "<input id='newPasskeyName' placeholder='" +
+        escapeHtml(t("passkeyNamePlaceholder")) +
+        "' /></label>",
+      t("addPasskey"),
+      async function (form: Dynamic, close: Dynamic) {
+        const name = (
+          form.querySelector("#newPasskeyName")?.value || ""
+        ).trim();
+        try {
+          await addThisDevice(name, btn);
+          close();
+        } catch (error) {
+          toast(errorMessage(error), true, btn);
+        }
+      },
+    );
+  });
+
+  byId("passkeyList")!.addEventListener("click", async function (e: Dynamic) {
+    const renameBtn = e.target.closest("[data-rename-passkey]");
+    if (renameBtn) {
+      if (state.preview) return;
+      const credentialId = renameBtn.getAttribute("data-rename-passkey");
+      const current = renameBtn.getAttribute("data-name") || "";
+      openEntryDialog(
+        t("rename"),
+        "<label>" +
+          escapeHtml(t("passkeyNameLabel")) +
+          "<input id='renamePasskeyName' value='" +
+          escapeHtml(current) +
+          "' /></label>",
+        t("save"),
+        async function (form: Dynamic, close: Dynamic) {
+          const name = (
+            form.querySelector("#renamePasskeyName")?.value || ""
+          ).trim();
+          if (!name) return;
+          try {
+            await api("/api/me/passkeys/" + encodeURIComponent(credentialId), {
+              method: "PATCH",
+              body: JSON.stringify({ displayName: name }),
+            });
+            close();
+            toast(t("passkeyRenamed"), false, renameBtn);
+            await loadPasskeys();
+          } catch (error) {
+            toast(errorMessage(error), true, renameBtn);
+          }
+        },
+      );
+      return;
+    }
+    const deleteBtn = e.target.closest("[data-delete-passkey]");
+    if (!deleteBtn || state.preview) return;
+    const credentialId = deleteBtn.getAttribute("data-delete-passkey");
+    openEntryDialog(
+      t("delete") + " — " + t("passkeyDevices"),
+      "<p class='muted'>" + escapeHtml(t("passkeyDeleteConfirm")) + "</p>",
+      t("delete"),
+      async function (_: Dynamic, close: Dynamic) {
+        try {
+          await api("/api/me/passkeys/" + encodeURIComponent(credentialId), {
+            method: "DELETE",
+          });
+          close();
+          toast(t("passkeyRemoved"), false, deleteBtn);
+          await loadPasskeys();
+        } catch (error) {
+          toast(errorMessage(error), true, deleteBtn);
+        }
+      },
+    );
+  });
+
   await loadProfileAndTokens();
+  await loadPasskeys();
 }

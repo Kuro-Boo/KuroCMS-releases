@@ -716,6 +716,39 @@ async function articles() {
       }
       return;
     }
+    const snsBtn = e.target.closest("[data-sns-post]");
+    if (snsBtn) {
+      if (state.preview) return;
+      const snsDid = snsBtn.dataset.snsPost;
+      if (!snsDid) return;
+      openEntryDialog(
+        t("snsPostBtn") + " — Bluesky",
+        "<p class='muted'>" + escapeHtml(t("snsPostConfirm")) + "</p>",
+        t("snsPostBtn"),
+        async function (_: Dynamic, close: Dynamic) {
+          snsBtn.disabled = true;
+          try {
+            const res = await api(
+              "/api/documents/" + snsDid + "/sns/bsky/post",
+              { method: "POST" },
+            );
+            const doc: Dynamic = allDocs.find(function (d) {
+              return d.did === snsDid;
+            });
+            if (doc)
+              doc.sns_bsky_posted_at =
+                res.bsky?.postedAt || new Date().toISOString();
+            close();
+            renderList();
+            toast(t("snsPostDone"), false);
+          } catch (err) {
+            toast(errorMessage(err), true);
+            snsBtn.disabled = false;
+          }
+        },
+      );
+      return;
+    }
     const btn = e.target.closest("[data-did][data-mode]");
     if (!btn) return;
     const did = btn.dataset.did;
@@ -788,6 +821,57 @@ function renderArticleTable(documents: Dynamic) {
         escapeHtml(t("updatedSuffix")) +
         ")</span>"
       : "";
+    const categoryNames = String(doc.category_names || "")
+      .split(",")
+      .map(function (name: Dynamic) {
+        return String(name || "").trim();
+      })
+      .filter(Boolean);
+    const categoryHtml = categoryNames.length
+      ? categoryNames
+          .map(function (name: Dynamic) {
+            return "<span class='artListCat'>" + escapeHtml(name) + "</span>";
+          })
+          .join("")
+      : "<span class='artMeta2'>-</span>";
+    const typeCategoryHtml =
+      "<div class='artTypeCats'><span class='artListType'>" +
+      escapeHtml(doc.tid) +
+      "</span>" +
+      categoryHtml +
+      "</div>";
+    // canPost: only Bluesky has a real posting integration. Unposted + postable
+    // shows a green "投稿" button; other services stay as an unposted label.
+    function snsLine(label: string, postedAt: Dynamic, canPost: boolean) {
+      const posted = Boolean(postedAt);
+      const value =
+        !posted && canPost
+          ? "<button type='button' class='snsPostBtn' data-sns-post='" +
+            escapeHtml(doc.did) +
+            "'" +
+            (state.preview ? " disabled" : "") +
+            ">" +
+            escapeHtml(t("snsPostBtn")) +
+            "</button>"
+          : "<span class='snsStatusValue'>" +
+            escapeHtml(posted ? t("snsPublished") : t("snsUnpublished")) +
+            "</span>";
+      return (
+        "<div class='snsStatusLine " +
+        (posted ? "posted" : "unposted") +
+        "'><span class='snsStatusName'>" +
+        escapeHtml(label) +
+        "</span>" +
+        value +
+        "</div>"
+      );
+    }
+    const snsStatusHtml =
+      "<div class='snsStatusList'>" +
+      snsLine("BSKY", doc.sns_bsky_posted_at, true) +
+      snsLine("THREADS", doc.sns_threads_posted_at, false) +
+      snsLine("X", doc.sns_x_posted_at, false) +
+      "</div>";
     const editHref = adminHref("/articles/" + escapeHtml(doc.did));
     const modeBtnStyle = isPublished
       ? "background:rgba(120,120,120,.1);color:var(--muted);border:1px solid var(--line)"
@@ -810,11 +894,9 @@ function renderArticleTable(documents: Dynamic) {
         "' style='margin-bottom:8px;white-space:normal;word-break:break-all'>" +
         escapeHtml(doc.slug) +
         "</button>" +
-        // Meta row: type / lang / date
+        // Meta row: type / categories / lang / date
         "<div style='display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:8px;font-size:12px'>" +
-        "<span style='background:var(--surface-3);padding:1px 7px;border-radius:4px;color:var(--muted)'>" +
-        escapeHtml(doc.tid) +
-        "</span>" +
+        typeCategoryHtml +
         "<span style='color:var(--muted)'>" +
         escapeHtml(baseLang) +
         langExtra +
@@ -823,6 +905,12 @@ function renderArticleTable(documents: Dynamic) {
         escapeHtml(pubDate) +
         "</span>" +
         (updText ? "<span class='artMeta2'>" + updText + "</span>" : "") +
+        "</div>" +
+        "<div class='snsStatusMobile'>" +
+        "<div class='artMeta2' style='font-weight:700;margin-bottom:3px'>" +
+        escapeHtml(t("snsPublishStatus")) +
+        "</div>" +
+        snsStatusHtml +
         "</div>" +
         // Status + action
         "<div style='display:flex;align-items:center;gap:8px'>" +
@@ -861,9 +949,10 @@ function renderArticleTable(documents: Dynamic) {
       "'>" +
       escapeHtml(doc.slug) +
       "</button>" +
+      typeCategoryHtml +
       "</td>" +
       "<td>" +
-      escapeHtml(doc.tid) +
+      snsStatusHtml +
       "</td>" +
       "<td>" +
       "<span class='badge " +
@@ -911,7 +1000,7 @@ function renderArticleTable(documents: Dynamic) {
     "<th class='flexible'>" +
     escapeHtml(t("titleSlugHeader")) +
     "</th><th>" +
-    escapeHtml(t("type")) +
+    escapeHtml(t("snsPublishStatus")) +
     "</th><th>" +
     escapeHtml(t("statusActionsHeader")) +
     "</th><th>" +

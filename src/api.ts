@@ -8,6 +8,7 @@ import {
   requireAuth,
   requireAuthor,
   sessionCookieHeader,
+  tryAuth,
   tryLocalDevUser,
 } from "./auth";
 import {
@@ -18,7 +19,8 @@ import {
   setBuildMode,
   type BuildMode,
 } from "./public";
-import { cacheVersion, makeId, nowIso, randomToken } from "./crypto";
+import { cacheVersion, makeId, nowIso, randomToken, sha256Hex } from "./crypto";
+import { KUROMAILER_SHARED_SECRET } from "./kuromailer-secret";
 import { verifyRegistration, verifyAuthentication } from "./webauthn";
 import {
   HttpError,
@@ -51,6 +53,11 @@ interface DocumentRow {
   updated_at: string;
   title: string | null;
   languages: string | null;
+  category_ids: string | null;
+  category_names: string | null;
+  sns_bsky_posted_at: string | null;
+  sns_threads_posted_at: string | null;
+  sns_x_posted_at: string | null;
 }
 
 interface SingleDocumentRow {
@@ -108,7 +115,7 @@ interface ManagedLanguageRow {
   search_count: number;
 }
 
-export const KUROCMS_VERSION = "1.6.13";
+export const KUROCMS_VERSION = "1.7.2";
 const KUROCMS_GITHUB_REPO = "Kuro-Boo/KuroCMS-releases";
 const KUROCMS_COMMUNITY_BASE_URL = "https://kuro.boo/kurocms";
 
@@ -231,6 +238,15 @@ export async function handleApi(
       return withJsonHeaders(await getInviteInfo(env, inviteTokenMatch[1]));
     }
 
+    // Passkey recovery by email (locked-out users). Both endpoints are public.
+    if (request.method === "POST" && path === "/api/auth/recover/request") {
+      return withJsonHeaders(await recoverRequest(request, env));
+    }
+    const recoverTokenMatch = path.match(/^\/api\/auth\/recover\/([^/]+)$/);
+    if (request.method === "GET" && recoverTokenMatch) {
+      return withJsonHeaders(await getRecoverInfo(env, recoverTokenMatch[1]));
+    }
+
     if (
       request.method === "POST" &&
       path === "/api/auth/passkey/register/begin"
@@ -348,6 +364,21 @@ export async function handleApi(
       );
     }
 
+    // Passkey (device) management for the signed-in user.
+    if (request.method === "GET" && path === "/api/me/passkeys") {
+      return withJsonHeaders(await listMyPasskeys(env, user));
+    }
+    const mePasskeyMatch = path.match(/^\/api\/me\/passkeys\/([^/]+)$/);
+    if (mePasskeyMatch) {
+      const credentialId = decodeURIComponent(mePasskeyMatch[1]);
+      if (request.method === "PATCH")
+        return withJsonHeaders(
+          await renameMyPasskey(request, env, user, credentialId),
+        );
+      if (request.method === "DELETE")
+        return withJsonHeaders(await deleteMyPasskey(env, user, credentialId));
+    }
+
     if (path === "/api/settings") {
       return withJsonHeaders(await settings(request, env, user));
     }
@@ -463,16 +494,31 @@ export async function handleApi(
     }
 
     // Per-article SNS posted flag (Bluesky). GET reads it; PUT { bsky: bool }
-    // sets (true) or clears (false) it — manual override of the auto-post state.
+    // sets (true) or clears (false) it — manual override of the posted state.
     const documentSnsMatch = path.match(/^\/api\/documents\/([^/]+)\/sns$/);
     if (documentSnsMatch) {
       return withJsonHeaders(
         await documentSnsFlag(request, env, user, documentSnsMatch[1]),
       );
     }
+    // On-demand post to Bluesky (the green "投稿" button on unposted articles).
+    const documentSnsPostMatch = path.match(
+      /^\/api\/documents\/([^/]+)\/sns\/bsky\/post$/,
+    );
+    if (request.method === "POST" && documentSnsPostMatch) {
+      return withJsonHeaders(
+        await postDocumentToBluesky(env, user, documentSnsPostMatch[1]),
+      );
+    }
 
     if (request.method === "POST" && path === "/api/media/upload") {
       return withJsonHeaders(await uploadMediaFile(request, env, user));
+    }
+    const mediaAssetMatch = path.match(/^\/api\/media\/asset\/([^/]+)$/);
+    if (request.method === "GET" && mediaAssetMatch) {
+      return withJsonHeaders(
+        await getMediaAssetByMid(env, decodeURIComponent(mediaAssetMatch[1])),
+      );
     }
     if (request.method === "GET" && path === "/api/media/images") {
       return withJsonHeaders(await listMediaAssets(env, user, "image"));
@@ -996,6 +1042,204 @@ async function getInviteInfo(env: Env, token: string): Promise<Response> {
   });
 }
 
+// ─── Email sending (via KuroMailer) ────────────────────────────────────────────
+
+/** Minimal HTML-escape for interpolating text into email HTML bodies. */
+function htmlEscape(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/**
+ * Send one email through KuroMailer's KuroCMS endpoint. Server-side only — the
+ * shared secret (KUROCMS_AND_KUROMAILER_PAT) is never exposed to the browser.
+ * Spec: ../KuroMailer/docs/kurocms_rest_api.md.
+ */
+async function sendMail(
+  env: Env,
+  msg: {
+    to: string;
+    subject: string;
+    html?: string;
+    text?: string;
+    fromName?: string;
+    replyTo?: string;
+    idempotencyKey?: string;
+  },
+): Promise<void> {
+  // The shared key is embedded as a common constant; an optional Worker Secret
+  // (env) may override it, but by default no per-install setup is required.
+  const secret =
+    (env.KUROCMS_AND_KUROMAILER_PAT ?? "").trim() || KUROMAILER_SHARED_SECRET;
+  if (!secret) {
+    throw new HttpError(
+      503,
+      "mailer_not_configured",
+      "Email sending is not configured (missing KuroMailer shared secret).",
+    );
+  }
+  const base = (env.KUROMAILER_URL ?? "https://kuromailer.kuro.boo").replace(
+    /\/+$/,
+    "",
+  );
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${secret}`,
+    "Content-Type": "application/json",
+  };
+  if (msg.idempotencyKey) headers["Idempotency-Key"] = msg.idempotencyKey;
+  const resp = await fetch(`${base}/api/kurocms/send`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(msg),
+  });
+  if (!resp.ok) {
+    let detail = resp.statusText;
+    try {
+      const d = (await resp.json()) as { error?: string };
+      if (d?.error) detail = d.error;
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new HttpError(
+      502,
+      "mail_send_failed",
+      `KuroMailer ${resp.status}: ${detail}`,
+    );
+  }
+}
+
+// ─── Passkey recovery (emailed magic link) ─────────────────────────────────────
+
+const RECOVERY_TOKEN_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const RECOVERY_THROTTLE_MS = 60 * 1000; // min gap between requests per user
+
+/** Derive the admin base path (e.g. "/kurocms/admin") from ACCESS_ADMIN_URL. */
+function adminBasePath(env: Env): string {
+  const raw = String(env.ACCESS_ADMIN_URL || "/kurocms/admin").trim();
+  try {
+    return new URL(raw).pathname.replace(/\/+$/, "") || "/kurocms/admin";
+  } catch {
+    return (
+      (raw.startsWith("/") ? raw : `/${raw}`).replace(/\/+$/, "") ||
+      "/kurocms/admin"
+    );
+  }
+}
+
+/**
+ * Request a recovery link by email. Always returns 200 (no account enumeration);
+ * only sends mail when a matching, enabled user exists and isn't throttled.
+ */
+async function recoverRequest(request: Request, env: Env): Promise<Response> {
+  const body = await readJson(request);
+  const email = (optionalString(body, "email") ?? "").trim().toLowerCase();
+  const ok = json({ ok: true });
+  if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return ok;
+
+  const user = await env.DB.prepare(
+    "SELECT uid, email FROM users WHERE email = ? AND disabled_at IS NULL",
+  )
+    .bind(email)
+    .first<{ uid: string; email: string }>();
+  if (!user) return ok; // unknown email — say nothing
+
+  // Throttle: skip if a token was issued for this user very recently.
+  const recent = await env.DB.prepare(
+    "SELECT created_at FROM recovery_tokens WHERE uid = ? ORDER BY created_at DESC LIMIT 1",
+  )
+    .bind(user.uid)
+    .first<{ created_at: string }>();
+  if (
+    recent &&
+    Date.now() - Date.parse(recent.created_at) < RECOVERY_THROTTLE_MS
+  ) {
+    return ok;
+  }
+
+  const token = randomToken();
+  const tokenHash = await sha256Hex(token);
+  const now = nowIso();
+  const expiresAt = new Date(Date.now() + RECOVERY_TOKEN_TTL_MS).toISOString();
+  await env.DB.prepare(
+    `INSERT INTO recovery_tokens (token_hash, uid, email, expires_at, created_at)
+     VALUES (?, ?, ?, ?, ?)`,
+  )
+    .bind(tokenHash, user.uid, user.email, expiresAt, now)
+    .run();
+
+  const origin = new URL(request.url).origin;
+  const link = `${origin}${adminBasePath(env)}/?recover=${encodeURIComponent(token)}`;
+  const settings = await env.DB.prepare(
+    "SELECT site_name FROM site_settings WHERE id = 1",
+  ).first<{ site_name: string | null }>();
+  const siteName = (settings?.site_name ?? "KuroCMS").trim() || "KuroCMS";
+
+  try {
+    await sendMail(env, {
+      to: user.email,
+      fromName: siteName,
+      subject: `[${siteName}] パスキー再設定のご案内 / Passkey recovery`,
+      text:
+        `${siteName} の管理画面にサインインするための新しいパスキーを登録できます。\n` +
+        `次のリンクを開いてください（30分間有効・1回のみ）:\n${link}\n\n` +
+        `心当たりがない場合はこのメールを無視してください。\n\n` +
+        `Register a new passkey to sign in to ${siteName}.\n` +
+        `Open this link (valid for 30 minutes, single use):\n${link}\n`,
+      html:
+        `<p>${htmlEscape(siteName)} の管理画面にサインインするための新しいパスキーを登録できます。</p>` +
+        `<p><a href="${link}">パスキーを再設定する / Register a new passkey</a></p>` +
+        `<p style="color:#666;font-size:13px">このリンクは30分間有効で、1回のみ使用できます。心当たりがない場合は無視してください。</p>`,
+      idempotencyKey: `recover-${tokenHash}`,
+    });
+  } catch (err) {
+    // Never leak configuration/send errors to an anonymous caller; log only.
+    console.warn(
+      JSON.stringify({
+        event: "recovery_mail_failed",
+        uid: user.uid,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+  }
+  return ok;
+}
+
+/** Look up a recovery token's account (for the recovery screen). Public. */
+async function getRecoverInfo(env: Env, token: string): Promise<Response> {
+  const row = await lookupRecoveryToken(env, token);
+  if (!row) {
+    throw new HttpError(
+      404,
+      "recover_invalid",
+      "This recovery link is invalid or has already been used.",
+    );
+  }
+  if (Date.parse(row.expires_at) <= Date.now()) {
+    throw new HttpError(
+      404,
+      "recover_expired",
+      "This recovery link has expired.",
+    );
+  }
+  return json({ email: row.email, expiresAt: row.expires_at });
+}
+
+/** Resolve an unused recovery token by its plaintext value. */
+async function lookupRecoveryToken(
+  env: Env,
+  token: string,
+): Promise<{ uid: string; email: string; expires_at: string } | null> {
+  const tokenHash = await sha256Hex(token);
+  return await env.DB.prepare(
+    "SELECT uid, email, expires_at FROM recovery_tokens WHERE token_hash = ? AND used_at IS NULL",
+  )
+    .bind(tokenHash)
+    .first<{ uid: string; email: string; expires_at: string }>();
+}
+
 async function passkeyRegisterBegin(
   request: Request,
   env: Env,
@@ -1003,20 +1247,34 @@ async function passkeyRegisterBegin(
   const body = await readJson(request);
   const uid = optionalString(body, "uid") ?? null;
   const invitationToken = optionalString(body, "invitationToken") ?? null;
+  const recoveryToken = optionalString(body, "recoveryToken") ?? null;
 
-  let userEmail = "";
-  let resolvedUid: string | null = uid;
+  let userEmail: string;
+  let resolvedUid: string | null;
 
-  if (uid) {
-    const userRow = await env.DB.prepare(
-      "SELECT uid, email FROM users WHERE uid = ?",
-    )
-      .bind(uid)
-      .first<{ uid: string; email: string }>();
-    if (!userRow) {
-      throw new HttpError(404, "user_not_found", "User was not found.");
+  // Authorization for who a new passkey may be registered to, in priority order:
+  //   1. Authenticated session → add a device to MY account (body uid ignored).
+  //   2. Valid invitation token → new user (uid created at complete time).
+  //   3. Valid recovery token → add a passkey to the existing locked-out account.
+  //   4. Bootstrap: a uid may be used ONLY when no passkeys exist anywhere yet
+  //      (the very first passkey, i.e. initial setup). Once any passkey exists,
+  //      adding to an account requires a session — closing the previous hole
+  //      where an arbitrary uid could be passed unauthenticated.
+  const sessionUser = await tryAuth(env, request);
+  if (sessionUser) {
+    resolvedUid = sessionUser.uid;
+    userEmail = sessionUser.email;
+  } else if (recoveryToken) {
+    const rec = await lookupRecoveryToken(env, recoveryToken);
+    if (!rec || Date.parse(rec.expires_at) <= Date.now()) {
+      throw new HttpError(
+        404,
+        "recover_invalid",
+        "This recovery link is invalid, expired, or already used.",
+      );
     }
-    userEmail = userRow.email;
+    resolvedUid = rec.uid;
+    userEmail = rec.email;
   } else if (invitationToken) {
     const invRow = await env.DB.prepare(
       `SELECT email FROM invitation_tokens WHERE token = ? AND used_at IS NULL`,
@@ -1032,6 +1290,33 @@ async function passkeyRegisterBegin(
     }
     userEmail = invRow.email;
     resolvedUid = null; // will be created at complete time
+  } else if (uid) {
+    const credCount = await env.DB.prepare(
+      "SELECT COUNT(*) AS cnt FROM passkey_credentials",
+    ).first<{ cnt: number }>();
+    if ((credCount?.cnt ?? 0) > 0) {
+      throw new HttpError(
+        403,
+        "registration_not_authorized",
+        "Sign in or use a valid invitation to register a passkey.",
+      );
+    }
+    const userRow = await env.DB.prepare(
+      "SELECT uid, email FROM users WHERE uid = ?",
+    )
+      .bind(uid)
+      .first<{ uid: string; email: string }>();
+    if (!userRow) {
+      throw new HttpError(404, "user_not_found", "User was not found.");
+    }
+    resolvedUid = uid;
+    userEmail = userRow.email;
+  } else {
+    throw new HttpError(
+      401,
+      "registration_not_authorized",
+      "Sign in or use a valid invitation to register a passkey.",
+    );
   }
 
   const challengeId = makeId("wac");
@@ -1075,6 +1360,9 @@ async function passkeyRegisterComplete(
   const body = await readJson(request);
   const challengeId = requireString(body, "challengeId", { min: 1, max: 80 });
   const invitationToken = optionalString(body, "invitationToken") ?? null;
+  const recoveryToken = optionalString(body, "recoveryToken") ?? null;
+  // Optional human-friendly device label shown in passkey management.
+  const deviceName = (optionalString(body, "deviceName") ?? "").slice(0, 80);
 
   const credential = body.credential as {
     id: string;
@@ -1232,11 +1520,22 @@ async function passkeyRegisterComplete(
       verifyResult.publicKeySpki,
       verifyResult.signCount,
       verifyResult.aaguid,
-      resolvedEmail,
+      deviceName || resolvedEmail,
       now,
       now,
     )
     .run();
+
+  // Consume the recovery token (single-use). The guard prevents reuse if the
+  // same link is opened twice concurrently.
+  if (recoveryToken) {
+    const tokenHash = await sha256Hex(recoveryToken);
+    await env.DB.prepare(
+      "UPDATE recovery_tokens SET used_at = ? WHERE token_hash = ? AND used_at IS NULL",
+    )
+      .bind(now, tokenHash)
+      .run();
+  }
 
   const sessionId = await createSession(env, resolvedUid);
   const secure = new URL(request.url).protocol === "https:";
@@ -2448,7 +2747,6 @@ async function settings(
           (row?.bluesky_feed_position as string | undefined) ?? "left",
         blueskySid: (row?.bluesky_sid as string | undefined) ?? "",
         blueskyTokenSet: !!(row?.bluesky_token as string | undefined),
-        snsAutoPost: (row?.sns_auto_post as number | undefined) === 1,
         threadsHandle: (row?.threads_handle as string | undefined) ?? "",
         threadsShowFeed: row?.threads_show_feed === 1,
         siteIsPublished: (row?.site_is_published as number | undefined) === 1,
@@ -2483,6 +2781,10 @@ async function settings(
 
     const themeSidebar = optionalString(body, "themeSidebar") ?? "#ffffff";
     const themeMainPane = optionalString(body, "themeMainPane") ?? "#f7f8fb";
+    const hasBlueskyHandle = "blueskyHandle" in body;
+    const hasBlueskyShowFeed = "blueskyShowFeed" in body;
+    const hasBlueskyFeedPosition = "blueskyFeedPosition" in body;
+    const hasBlueskySid = "blueskySid" in body;
     const blueskyHandle = optionalString(body, "blueskyHandle") ?? "";
     const blueskyShowFeed =
       body.blueskyShowFeed === true || body.blueskyShowFeed === "true";
@@ -2491,8 +2793,6 @@ async function settings(
         ? "right"
         : "left";
     const blueskySid = optionalString(body, "blueskySid") ?? "";
-    const snsAutoPost =
-      body.snsAutoPost === true || body.snsAutoPost === "true";
     // Bluesky app password: only update when a non-empty value is sent, so saving
     // the form without re-typing the password keeps the stored one.
     const blueskyToken = optionalString(body, "blueskyToken") ?? "";
@@ -2534,15 +2834,16 @@ async function settings(
       theme_accent: themeAccent,
       theme_sidebar: themeSidebar,
       theme_main_pane: themeMainPane,
-      bluesky_handle: blueskyHandle,
-      // INTEGER columns: store 1/0, not "true"/"false". A text value left the
-      // admin GET (`=== 1`) and public read (truthy) disagreeing.
-      bluesky_show_feed: blueskyShowFeed ? 1 : 0,
-      bluesky_feed_position: blueskyFeedPosition,
-      bluesky_sid: blueskySid,
-      sns_auto_post: snsAutoPost ? 1 : 0,
     };
     // Preserve unless explicitly provided (see notes above).
+    if (hasBlueskyHandle) settingsToSave.bluesky_handle = blueskyHandle;
+    // INTEGER columns: store 1/0, not "true"/"false". A text value left the
+    // admin GET (`=== 1`) and public read (truthy) disagreeing.
+    if (hasBlueskyShowFeed)
+      settingsToSave.bluesky_show_feed = blueskyShowFeed ? 1 : 0;
+    if (hasBlueskyFeedPosition)
+      settingsToSave.bluesky_feed_position = blueskyFeedPosition;
+    if (hasBlueskySid) settingsToSave.bluesky_sid = blueskySid;
     if (hasSiteDescription) settingsToSave.site_description = siteDescription;
     if (hasGa4) settingsToSave.ga4_measurement_id = ga4MeasurementId;
     if (hasThreadsHandle) settingsToSave.threads_handle = threadsHandle;
@@ -2572,7 +2873,7 @@ async function settings(
   throw new HttpError(405, "method_not_allowed", "Method is not allowed.");
 }
 
-// ── SNS auto-post (Bluesky) ─────────────────────────────────────────────────
+// ── SNS posting (Bluesky) — explicit, decoupled from publishing ──────────────
 const BSKY_IMAGE_MAX_BYTES = 950_000;
 const BSKY_IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
@@ -2626,31 +2927,47 @@ async function transformBlueskyCover(
   return bytes ? { bytes, mime: "image/webp" } : null;
 }
 
-// Called in the background (ctx.waitUntil) on the first publish. All gating is
-// here so the publish path stays clean: requires the auto-post toggle, Bluesky
-// credentials (handle + app password), a configured public_domain, the document
-// to be published (mode=1), and sns_bsky_posted_at to be NULL. The final UPDATE
-// is guarded by `WHERE sns_bsky_posted_at IS NULL` so concurrent publishes can't
-// double-post, and a posted article is never re-posted on re-publish.
-async function maybeAutoPostBluesky(env: Env, did: string): Promise<void> {
+type BlueskyPostResult =
+  | { ok: true; postedAt: string }
+  | {
+      ok: false;
+      code:
+        | "not_configured"
+        | "no_public_domain"
+        | "not_published"
+        | "already_posted"
+        | "cover_failed"
+        | "post_failed";
+    };
+
+/**
+ * Build and post a single article to Bluesky, returning a discriminated result
+ * (no throwing for expected conditions). Used by the on-demand "投稿" button
+ * (postDocumentToBluesky). Requires Bluesky credentials, a public_domain, the
+ * document published (mode=1) and sns_bsky_posted_at NULL; the final UPDATE is
+ * guarded by `WHERE sns_bsky_posted_at IS NULL` so it never double-posts.
+ */
+async function postBlueskyForDoc(
+  env: Env,
+  did: string,
+): Promise<BlueskyPostResult> {
   const s = await env.DB.prepare(
-    "SELECT sns_auto_post, bluesky_handle, bluesky_token, public_domain FROM site_settings WHERE id = 1",
+    "SELECT bluesky_handle, bluesky_token, public_domain FROM site_settings WHERE id = 1",
   ).first<{
-    sns_auto_post: number | null;
     bluesky_handle: string | null;
     bluesky_token: string | null;
     public_domain: string | null;
   }>();
-  if (!s || s.sns_auto_post !== 1) return;
-  const handle = (s.bluesky_handle ?? "").trim();
-  const password = (s.bluesky_token ?? "").trim();
+  const handle = (s?.bluesky_handle ?? "").trim();
+  const password = (s?.bluesky_token ?? "").trim();
+  if (!handle || !password) return { ok: false, code: "not_configured" };
   let origin = "";
   try {
-    if (s.public_domain) origin = new URL(s.public_domain).origin;
+    if (s?.public_domain) origin = new URL(s.public_domain).origin;
   } catch {
     /* invalid public_domain */
   }
-  if (!handle || !password || !origin) return;
+  if (!origin) return { ok: false, code: "no_public_domain" };
 
   const doc = await env.DB.prepare(
     "SELECT tid, slug, initial_lang, sns_bsky_posted_at FROM documents WHERE did = ? AND mode = 1",
@@ -2662,7 +2979,8 @@ async function maybeAutoPostBluesky(env: Env, did: string): Promise<void> {
       initial_lang: string;
       sns_bsky_posted_at: string | null;
     }>();
-  if (!doc || doc.sns_bsky_posted_at) return; // not published, or already posted
+  if (!doc) return { ok: false, code: "not_published" };
+  if (doc.sns_bsky_posted_at) return { ok: false, code: "already_posted" };
 
   const tl = await env.DB.prepare(
     "SELECT title, summary, seo_json FROM document_translations WHERE did = ? AND lang = ?",
@@ -2721,7 +3039,7 @@ async function maybeAutoPostBluesky(env: Env, did: string): Promise<void> {
         error: error instanceof Error ? error.message : String(error),
       }),
     );
-    return;
+    return { ok: false, code: "cover_failed" };
   }
   if (hasCover && !image) {
     console.warn(
@@ -2731,7 +3049,7 @@ async function maybeAutoPostBluesky(env: Env, did: string): Promise<void> {
         error: "cover could not be reduced below the Bluesky size limit",
       }),
     );
-    return;
+    return { ok: false, code: "cover_failed" };
   }
 
   try {
@@ -2739,19 +3057,53 @@ async function maybeAutoPostBluesky(env: Env, did: string): Promise<void> {
   } catch (error) {
     console.warn(
       JSON.stringify({
-        event: "bsky_auto_post_failed",
+        event: "bsky_post_failed",
         did,
         error: error instanceof Error ? error.message : String(error),
       }),
     );
-    return; // post failed -> leave flag NULL -> retried on the next publish
+    return { ok: false, code: "post_failed" };
   }
 
+  const postedAt = nowIso();
   await env.DB.prepare(
     "UPDATE documents SET sns_bsky_posted_at = ? WHERE did = ? AND sns_bsky_posted_at IS NULL",
   )
-    .bind(nowIso(), did)
+    .bind(postedAt, did)
     .run();
+  return { ok: true, postedAt };
+}
+
+/**
+ * On-demand "投稿" button: post an article to Bluesky now. Surfaces failures as
+ * HTTP errors (unlike the silent auto-post path, which has been removed).
+ */
+async function postDocumentToBluesky(
+  env: Env,
+  user: AuthUser,
+  did: string,
+): Promise<Response> {
+  requireAuthor(user);
+  const result = await postBlueskyForDoc(env, did);
+  if (result.ok) {
+    await logActivity(env, user, "document.sns_post", "document", did, {
+      bsky: true,
+    });
+    return json({
+      did,
+      bsky: { posted: true, postedAt: result.postedAt },
+    });
+  }
+  const failures: Record<string, [number, string]> = {
+    not_configured: [400, "Bluesky is not configured in Settings → SNS."],
+    no_public_domain: [400, "Set the site's public domain first."],
+    not_published: [409, "Publish the article before posting to Bluesky."],
+    already_posted: [409, "This article was already posted to Bluesky."],
+    cover_failed: [502, "The cover image could not be prepared for Bluesky."],
+    post_failed: [502, "Posting to Bluesky failed. Check your credentials."],
+  };
+  const [status, message] = failures[result.code] ?? [500, "Posting failed."];
+  throw new HttpError(status, "bsky_" + result.code, message);
 }
 
 // Post a single article to Bluesky (AT Protocol), mirroring kuro-boo's
@@ -2852,8 +3204,8 @@ async function postToBluesky(
 
 // REST: read / set the per-article Bluesky "already posted" flag.
 //   GET /api/documents/:did/sns        -> { did, bsky: { posted, postedAt } }
-//   PUT /api/documents/:did/sns {bsky}  -> bsky:true marks posted (suppresses
-//      future auto-post), bsky:false clears it (allows a fresh auto-post).
+//   PUT /api/documents/:did/sns {bsky}  -> bsky:true marks posted (so the "投稿"
+//      button hides), bsky:false clears it (re-enables the button).
 async function documentSnsFlag(
   request: Request,
   env: Env,
@@ -3146,6 +3498,80 @@ async function deleteMeToken(
     .run();
   await logActivity(env, user, "token.delete", "token", tokenId, {});
   return json({ ok: true, tokenId });
+}
+
+// ─── Passkey (device) management ───────────────────────────────────────────────
+
+/** List the signed-in user's registered passkeys (devices). */
+async function listMyPasskeys(env: Env, user: AuthUser): Promise<Response> {
+  const rows = await env.DB.prepare(
+    `SELECT credential_id, display_name, aaguid, created_at, last_used_at
+     FROM passkey_credentials WHERE uid = ? ORDER BY created_at ASC`,
+  )
+    .bind(user.uid)
+    .all<Record<string, unknown>>();
+  return json({ passkeys: rows.results as JsonValue });
+}
+
+/** Rename one of the signed-in user's passkeys (display label only). */
+async function renameMyPasskey(
+  request: Request,
+  env: Env,
+  user: AuthUser,
+  credentialId: string,
+): Promise<Response> {
+  const body = await readJson(request);
+  const displayName = requireString(body, "displayName", {
+    min: 1,
+    max: 80,
+  });
+  const result = await env.DB.prepare(
+    "UPDATE passkey_credentials SET display_name = ? WHERE credential_id = ? AND uid = ?",
+  )
+    .bind(displayName, credentialId, user.uid)
+    .run();
+  if (!result.meta.changes) {
+    throw new HttpError(404, "passkey_not_found", "Passkey was not found.");
+  }
+  return json({ ok: true, credentialId, displayName });
+}
+
+/**
+ * Delete one of the signed-in user's passkeys. The last remaining passkey
+ * cannot be removed — that would lock the user out of their own account.
+ */
+async function deleteMyPasskey(
+  env: Env,
+  user: AuthUser,
+  credentialId: string,
+): Promise<Response> {
+  const owned = await env.DB.prepare(
+    "SELECT credential_id FROM passkey_credentials WHERE credential_id = ? AND uid = ?",
+  )
+    .bind(credentialId, user.uid)
+    .first<{ credential_id: string }>();
+  if (!owned) {
+    throw new HttpError(404, "passkey_not_found", "Passkey was not found.");
+  }
+  const count = await env.DB.prepare(
+    "SELECT COUNT(*) AS cnt FROM passkey_credentials WHERE uid = ?",
+  )
+    .bind(user.uid)
+    .first<{ cnt: number }>();
+  if ((count?.cnt ?? 0) <= 1) {
+    throw new HttpError(
+      409,
+      "last_passkey",
+      "Cannot remove your only passkey. Add another device first.",
+    );
+  }
+  await env.DB.prepare(
+    "DELETE FROM passkey_credentials WHERE credential_id = ? AND uid = ?",
+  )
+    .bind(credentialId, user.uid)
+    .run();
+  await logActivity(env, user, "passkey.delete", "passkey", credentialId, {});
+  return json({ ok: true, credentialId });
 }
 
 async function types(
@@ -3598,7 +4024,11 @@ async function documents(
           MIN(dt.title)
         ) AS title,
         GROUP_CONCAT(dt.lang) AS languages,
-        (SELECT GROUP_CONCAT(cid) FROM document_categories WHERE did = d.did) AS category_ids
+        (SELECT GROUP_CONCAT(cid) FROM document_categories WHERE did = d.did) AS category_ids,
+        (SELECT GROUP_CONCAT(COALESCE(c.name, dc.cid))
+           FROM document_categories dc
+           LEFT JOIN categories c ON c.id = dc.cid
+          WHERE dc.did = d.did) AS category_names
       FROM documents d
       LEFT JOIN document_translations dt ON dt.did = d.did
       ${where}
@@ -3794,13 +4224,9 @@ async function documentDetail(
         }),
       );
     }
-    // SNS auto-post on the FIRST publish only. maybeAutoPostBluesky checks the
-    // toggle, credentials and sns_bsky_posted_at (posts only when NULL) so an
-    // unpublish -> draft -> re-publish never re-posts. Runs in the background;
-    // never blocks or fails the publish.
-    if (modeValue === 1) {
-      ctx.waitUntil(maybeAutoPostBluesky(env, did).catch(() => {}));
-    }
+    // SNS posting is decoupled from publishing: articles publish without touching
+    // SNS. Posting to Bluesky is an explicit action via the "投稿" button
+    // (POST /api/documents/:did/sns/bsky/post → postDocumentToBluesky).
     return json({ ok: true });
   }
 
@@ -4137,6 +4563,19 @@ async function listMediaAssets(
     .bind(kind)
     .all();
   return json({ items: rows.results as JsonValue }, { status: 200 });
+}
+
+/** Resolve a single media asset by its mid (e.g. to display [[img-xxx]] as a cover). */
+async function getMediaAssetByMid(env: Env, mid: string): Promise<Response> {
+  const row = await env.DB.prepare(
+    "SELECT mid AS id, kind, filename, mime, width, height, size_bytes AS sizeBytes, public_path AS publicPath, created_at AS createdAt FROM media_assets WHERE mid = ?",
+  )
+    .bind(mid)
+    .first<Record<string, unknown>>();
+  if (!row) {
+    throw new HttpError(404, "media_not_found", "Media asset was not found.");
+  }
+  return json({ item: row as JsonValue });
 }
 
 async function deleteMediaAsset(

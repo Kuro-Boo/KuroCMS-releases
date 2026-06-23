@@ -20,6 +20,9 @@ export interface Env {
   CF_WORKER_NAME?: string;
   COMMUNITY_PAT?: string;
   COMMUNITY_API?: Fetcher;
+  // Shared secret for KuroMailer's KuroCMS send endpoint, and optional base URL.
+  KUROCMS_AND_KUROMAILER_PAT?: string;
+  KUROMAILER_URL?: string;
 }
 
 export interface AuthUser {

@@ -272,11 +272,6 @@ async function settings() {
       "<div class='muted'>" +
       escapeHtml(t("blueskyAppPasswordHelp")) +
       "</div><input id='blueskyToken' type='password' placeholder='xxxx-xxxx-xxxx-xxxx' /></label>" +
-      "<div class='toggleRow'><div><div><b>" +
-      escapeHtml(t("snsAutoPost")) +
-      "</b></div><div class='tokenMeta'>" +
-      escapeHtml(t("snsAutoPostHelp")) +
-      "</div></div><input id='snsAutoPost' type='checkbox' class='toggle' /></div>" +
       "<div style='margin-top:16px;display:flex;justify-content:flex-end'><button type='submit'>" +
       escapeHtml(t("saveSiteSettings")) +
       "</button></div>" +
@@ -731,7 +726,6 @@ async function settings() {
 
     // SNS – Bluesky card: show only if handle is already set
     byId("blueskyHandle")!.value = s.blueskyHandle || "";
-    byId("snsAutoPost")!.checked = Boolean(s.snsAutoPost);
     if (s.blueskyTokenSet) {
       byId("blueskyToken")!.placeholder = "•••••••••••• ✓";
     }
@@ -1902,7 +1896,6 @@ async function settings() {
             initialLang: byId("defaultLang")!.value,
             blueskyHandle: (byId("blueskyHandle")?.value || "").trim(),
             blueskySid: bSid,
-            snsAutoPost: byId("snsAutoPost")?.checked || false,
             blueskyToken: (byId("blueskyToken")?.value || "").trim(),
             ...extraFields,
           }),

@@ -664,9 +664,6 @@ const i18n = {
     blueskyHandleHelp: "Your Bluesky handle (e.g. yourname.bsky.social).",
     blueskyShowFeed: "Show Feed on Public Pages",
     blueskyShowFeedHelp: "Display Bluesky posts in the sidebar.",
-    snsAutoPost: "Auto-post to SNS on publish",
-    snsAutoPostHelp:
-      "When a never-posted article is published, automatically post it to Bluesky (title, link, cover image). Re-publishing an already-posted article never posts again.",
     blueskyFeedPosition: "Feed Position",
     left: "Left",
     right: "Right",
@@ -780,6 +777,14 @@ const i18n = {
     loginWithPasskey: "Login with Passkey",
     registerPasskey: "Register Passkey",
     registeringPasskey: "Registering...",
+    lostDevice: "Lost your device?",
+    recoverRequestLead:
+      "Enter your registered email. We'll send a link to register a new passkey.",
+    recoverSendLink: "Send recovery link",
+    recoverSent:
+      "If that email is registered, a recovery link has been sent. Please check your inbox.",
+    recoverTitle: "Recover access",
+    recoverLead: "Register a new passkey for this account.",
     logout: "Logout",
     adminLogo: "Admin Logo URL",
     adminLogoHelp: "Direct link to your logo image or SVG data.",
@@ -868,6 +873,13 @@ const i18n = {
     unpublishAction: "Unpublish",
     publishAction: "Publish",
     titleSlugHeader: "Title / Slug",
+    snsPublishStatus: "SNS Publish Status",
+    snsPublished: "Published",
+    snsUnpublished: "Unpublished",
+    snsPostBtn: "Post",
+    snsPostConfirm:
+      "Post this article to Bluesky now (title, link, cover image)?",
+    snsPostDone: "Posted to Bluesky.",
     statusActionsHeader: "Status / Actions",
     langsSuffix: " lang(s)",
     updatedSuffix: " updated",
@@ -973,6 +985,9 @@ const i18n = {
     selectCoverBtn: "Load from File",
     clearCoverBtn: "Clear",
     coverDropHint: "Drop here or load from file",
+    coverMidHint:
+      "Specify a cover by image id, e.g. [[img-xxx]]. Loads when you leave the field.",
+    coverMidNotFound: "No image found for that id.",
     r2CoverUnavail: "R2 is not available. Media files cannot be used.",
     slugReadonly: "Slug cannot be changed after creation.",
     slugHint:
@@ -1237,6 +1252,20 @@ const i18n = {
     noRole: "No Role",
     disableAccount: "Disable Account",
     tokenDeleteConfirm: "Delete this token? This cannot be undone.",
+    rename: "Rename",
+    passkeyDevices: "Passkeys (devices)",
+    passkeyDevicesLead:
+      "Register passkeys on multiple devices so you can still sign in if one is lost.",
+    addPasskey: "Add this device",
+    passkeyNameLabel: "Device name",
+    passkeyNamePlaceholder: "e.g. MacBook, iPhone",
+    passkeyCreated: "Added",
+    passkeyLastUsed: "last used",
+    passkeyAdded: "Passkey added.",
+    passkeyRenamed: "Passkey renamed.",
+    passkeyRemoved: "Passkey removed.",
+    passkeyDeleteConfirm:
+      "Remove this passkey? That device will no longer be able to sign in.",
     editUserTitle: "Edit User: ",
     disabled: "Disabled",
   },
@@ -1451,9 +1480,6 @@ const i18n = {
       "Blueskyのハンドル名（例: yourname.bsky.social）。空白で非表示。",
     blueskyShowFeed: "公開ページにフィードを表示",
     blueskyShowFeedHelp: "公開ページのサイドバーにBlueskyの投稿を表示します。",
-    snsAutoPost: "公開時に SNS へ自動投稿",
-    snsAutoPostHelp:
-      "未投稿の記事を公開したとき、Bluesky に自動投稿します（タイトル・リンク・カバー画像）。投稿済みの記事を再公開しても再投稿はしません。",
     blueskyFeedPosition: "フィード表示位置",
     left: "左",
     right: "右",
@@ -1565,6 +1591,14 @@ const i18n = {
     loginWithPasskey: "パスキーでログイン",
     registerPasskey: "パスキーを登録",
     registeringPasskey: "登録中...",
+    lostDevice: "デバイスを紛失した場合",
+    recoverRequestLead:
+      "登録済みのメールアドレスを入力してください。新しいパスキーを登録するためのリンクを送信します。",
+    recoverSendLink: "再設定リンクを送信",
+    recoverSent:
+      "登録があれば、再設定リンクを送信しました。メールをご確認ください。",
+    recoverTitle: "アクセスを復旧",
+    recoverLead: "このアカウントに新しいパスキーを登録します。",
     logout: "ログアウト",
     adminLogo: "管理画面ロゴURL",
     adminLogoHelp:
@@ -1655,6 +1689,13 @@ const i18n = {
     unpublishAction: "非公開に",
     publishAction: "公開する",
     titleSlugHeader: "タイトル / Slug",
+    snsPublishStatus: "SNS公開状態",
+    snsPublished: "公開済み",
+    snsUnpublished: "未公開",
+    snsPostBtn: "投稿",
+    snsPostConfirm:
+      "この記事を Bluesky に投稿しますか？（タイトル・リンク・カバー画像）",
+    snsPostDone: "Bluesky に投稿しました。",
     statusActionsHeader: "状態 / 操作",
     langsSuffix: "言語",
     updatedSuffix: "更新",
@@ -1764,6 +1805,9 @@ const i18n = {
     selectCoverBtn: "画像をファイルから読込む",
     clearCoverBtn: "解除",
     coverDropHint: "ドロップまたはファイルから読込む",
+    coverMidHint:
+      "画像ID（例: [[img-xxx]]）でカバーを指定。フォーカスを外すと読み込みます。",
+    coverMidNotFound: "そのIDの画像が見つかりません。",
     r2CoverUnavail: "R2 が使えないとメディアファイルは使えません。",
     slugReadonly: "Slug は変更できません",
     slugHint:
@@ -2029,6 +2073,20 @@ const i18n = {
     noRole: "権限なし",
     disableAccount: "アカウント無効化",
     tokenDeleteConfirm: "このトークンを削除しますか？削除後は元に戻せません。",
+    rename: "名前を変更",
+    passkeyDevices: "パスキー（デバイス）",
+    passkeyDevicesLead:
+      "複数のデバイスにパスキーを登録しておくと、1台を失ってもサインインできます。",
+    addPasskey: "このデバイスを追加",
+    passkeyNameLabel: "デバイス名",
+    passkeyNamePlaceholder: "例: MacBook、iPhone",
+    passkeyCreated: "登録",
+    passkeyLastUsed: "最終使用",
+    passkeyAdded: "パスキーを追加しました。",
+    passkeyRenamed: "パスキー名を変更しました。",
+    passkeyRemoved: "パスキーを削除しました。",
+    passkeyDeleteConfirm:
+      "このパスキーを削除しますか？そのデバイスではサインインできなくなります。",
     editUserTitle: "ユーザー編集: ",
     disabled: "無効",
   },
@@ -3540,6 +3598,10 @@ async function render() {
       const inviteToken = urlParams.get("invite");
       if (inviteToken) {
         return inviteScreen(inviteToken);
+      }
+      const recoverToken = urlParams.get("recover");
+      if (recoverToken) {
+        return recoverScreen(recoverToken);
       }
 
       // Check session
