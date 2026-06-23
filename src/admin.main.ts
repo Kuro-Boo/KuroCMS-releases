@@ -263,6 +263,8 @@ const menuIcons: Record<string, string> = {
   help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a3 3 0 0 1 5.2 2c0 2-3 2.5-3 4.5"/><circle cx="12" cy="17.5" r=".6" fill="currentColor"/>',
   userManager:
     '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  backup:
+    '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/>',
 };
 const menuItems: Record<string, Dynamic[]> = {
   setup: [
@@ -341,6 +343,13 @@ const menuItems: Record<string, Dynamic[]> = {
       nav: "/users",
       key: "userManager",
       icon: menuIcons.userManager,
+      adminOnly: true,
+    },
+    {
+      href: adminHref("/backups"),
+      nav: "/backups",
+      key: "backup",
+      icon: menuIcons.backup,
       adminOnly: true,
     },
   ],
@@ -473,6 +482,31 @@ const i18n = {
     languageManager: "Languages",
     types: "Types",
     userManager: "Users",
+    backup: "Backup",
+    backupTabBackup: "Backup",
+    backupTabRestore: "Restore",
+    backupDesc:
+      "Save all KuroCMS content and settings — articles, translations, categories, taxonomies, media library metadata, templates, site settings and SNS connections — together with the actual image / video / audio files as a single ZIP. Login accounts and credentials (users, passkeys, personal access tokens) are excluded. Note: SNS connection tokens are included, so keep the backup file private. The archive streams directly to the file you choose, so very large sites back up without running out of memory.",
+    backupStart: "Back up…",
+    backupDone: "Backup completed.",
+    backupFailed: "Backup failed",
+    backupCancelled: "Cancelled.",
+    backupFallbackWarn:
+      "This browser cannot stream to disk; the backup is built in memory. Use Chrome or Edge for very large sites.",
+    restoreDesc:
+      "Restore a KuroCMS backup ZIP. Tables and media are streamed back one piece at a time, so large archives restore without exhausting memory.",
+    restoreWarn:
+      "Full replace: all current content, media and settings are deleted first, then replaced with the backup. User accounts and login credentials are not affected. This cannot be undone.",
+    restoreStart: "Choose a backup to restore…",
+    restoreDone:
+      "Restore completed. Rebuild the public site to regenerate pages.",
+    restoreFailed: "Restore failed",
+    restoreBadFile: "Not a valid KuroCMS backup file.",
+    restoreConfirmTitle: "Replace all data?",
+    restoreConfirmBody:
+      "This deletes all current content, media and settings, then restores from the selected backup. This cannot be undone.",
+    restoreConfirmYes: "Replace everything",
+    restorePhaseWipe: "Clearing existing data…",
     inviteUser: "Invite User",
     settings: "Settings",
     profile: "Profile",
@@ -1468,6 +1502,31 @@ const i18n = {
     reloadTypes: "タイプ再読み込み",
     articleCreated: "記事を作成しました。",
     userManager: "ユーザー管理",
+    backup: "バックアップ",
+    backupTabBackup: "バックアップ",
+    backupTabRestore: "レストア",
+    backupDesc:
+      "KuroCMS のすべてのコンテンツと設定（記事・翻訳・カテゴリ・タクソノミー・メディア管理情報・テンプレート・サイト設定・SNS 連携）を、画像／動画／音楽の実ファイルとともに 1 つの ZIP に保存します。ログインアカウントと認証情報（ユーザー・パスキー・個人アクセストークン）は含まれません。なお SNS 連携のトークンは含まれるため、バックアップファイルは厳重に保管してください。選択したファイルへ直接ストリーミング保存するため、大規模サイトでもメモリ不足になりません。",
+    backupStart: "バックアップ…",
+    backupDone: "バックアップが完了しました。",
+    backupFailed: "バックアップに失敗しました",
+    backupCancelled: "中止しました。",
+    backupFallbackWarn:
+      "このブラウザはディスクへの逐次書き込みに非対応のため、メモリ上で生成します。大規模サイトでは Chrome / Edge を使用してください。",
+    restoreDesc:
+      "KuroCMS のバックアップ ZIP から復元します。テーブルとメディアを 1 件ずつストリーミングで戻すため、大容量でもメモリを使い切りません。",
+    restoreWarn:
+      "全置換：現在のコンテンツ・メディア・設定をすべて削除してから、バックアップで置き換えます。ユーザーアカウントとログイン情報は影響を受けません。この操作は取り消せません。",
+    restoreStart: "復元するバックアップを選択…",
+    restoreDone:
+      "復元が完了しました。公開サイトを再ビルドするとページが再生成されます。",
+    restoreFailed: "復元に失敗しました",
+    restoreBadFile: "有効な KuroCMS バックアップファイルではありません。",
+    restoreConfirmTitle: "すべてのデータを置き換えますか？",
+    restoreConfirmBody:
+      "現在のコンテンツ・メディア・設定をすべて削除し、選択したバックアップから復元します。この操作は取り消せません。",
+    restoreConfirmYes: "すべて置き換える",
+    restorePhaseWipe: "既存データを削除中…",
     inviteUser: "ユーザーを招待",
     siteSettings: "サイト設定",
     settingsTabBasic: "基本",
@@ -3631,6 +3690,7 @@ async function render() {
     if (path === "/types") return types();
     if (path === "/settings") return settings();
     if (path === "/users") return loadUsersPanel();
+    if (path === "/backups") return backupScreen();
     if (path === "/profile") return profile();
     if (path === "/site") return siteManagement();
     if (path === "/help") return help();

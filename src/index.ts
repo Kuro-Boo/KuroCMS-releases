@@ -62,22 +62,39 @@ export default {
     if (new RegExp("^/(images|videos|audios)/").test(mediaStrippedPath)) {
       if (env.MEDIA_BUCKET) {
         const r2Key = mediaStrippedPath.replace(/^\//, "").split("?")[0];
-        const obj = await env.MEDIA_BUCKET.get(r2Key);
-        if (obj) {
-          const headers = new Headers();
-          headers.set(
-            "content-type",
-            obj.httpMetadata?.contentType || "application/octet-stream",
-          );
-          headers.set("cache-control", "public, max-age=31536000, immutable");
-          headers.set("etag", obj.etag);
-          headers.set("access-control-allow-origin", "*");
-          return new Response(obj.body, { headers });
+        // The binding stays present even after the R2 subscription is cancelled
+        // or the bucket is deleted; in that state .get() throws. Catch it so we
+        // fall through to ASSETS instead of returning a 500.
+        try {
+          const obj = await env.MEDIA_BUCKET.get(r2Key);
+          if (obj) {
+            const headers = new Headers();
+            headers.set(
+              "content-type",
+              obj.httpMetadata?.contentType || "application/octet-stream",
+            );
+            headers.set("cache-control", "public, max-age=31536000, immutable");
+            headers.set("etag", obj.etag);
+            headers.set("access-control-allow-origin", "*");
+            return new Response(obj.body, { headers });
+          }
+        } catch {
+          /* R2 unavailable (cancelled / deleted bucket) — fall back to ASSETS */
         }
       }
       const assetRes = await env.ASSETS.fetch(
         rewriteRequestPath(request, mediaStrippedPath),
       );
+      // Image not found anywhere (R2 unavailable / object missing and no static
+      // fallback): return an inline SVG placeholder with status 200 so <img>
+      // renders it instead of the browser's broken-image glyph. Video/audio
+      // can't render an SVG, so leave their 404 untouched.
+      if (
+        assetRes.status === 404 &&
+        new RegExp("^/images/").test(mediaStrippedPath)
+      ) {
+        return mediaPlaceholderResponse();
+      }
       const h = new Headers(assetRes.headers);
       h.set("access-control-allow-origin", "*");
       return new Response(assetRes.body, {
@@ -236,6 +253,32 @@ export default {
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+// Neutral, self-contained SVG shown in place of an image whose bytes are gone
+// (R2 subscription cancelled / bucket deleted / asset missing). Language-neutral
+// (icon only) and served no-store so the real image returns the moment R2 is
+// back. Status 200 is required — a 4xx makes <img> show the broken-image glyph.
+const MEDIA_PLACEHOLDER_SVG =
+  "<svg xmlns='http://www.w3.org/2000/svg' width='400' height='300' viewBox='0 0 400 300' role='img' aria-label='image unavailable'>" +
+  "<rect width='400' height='300' fill='#f1f5f9'/>" +
+  "<g fill='none' stroke='#cbd5e1' stroke-width='8' stroke-linecap='round' stroke-linejoin='round'>" +
+  "<rect x='130' y='105' width='140' height='100' rx='8'/>" +
+  "<circle cx='165' cy='140' r='12'/>" +
+  "<path d='M148 195l34-34 24 24 22-22 24 24'/>" +
+  "</g>" +
+  "<line x1='120' y1='95' x2='280' y2='215' stroke='#94a3b8' stroke-width='8' stroke-linecap='round'/>" +
+  "</svg>";
+
+function mediaPlaceholderResponse(): Response {
+  return new Response(MEDIA_PLACEHOLDER_SVG, {
+    status: 200,
+    headers: {
+      "content-type": "image/svg+xml; charset=utf-8",
+      "cache-control": "no-store",
+      "access-control-allow-origin": "*",
+    },
+  });
+}
 
 function validateRequiredBindings(env: Env): Response | null {
   // PUBLIC_PAGES is intentionally required. Do not silently tolerate missing KV;

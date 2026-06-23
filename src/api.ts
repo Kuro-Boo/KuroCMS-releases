@@ -25,6 +25,7 @@ import { verifyRegistration, verifyAuthentication } from "./webauthn";
 import {
   HttpError,
   json,
+  jsonError,
   readJson,
   requireSlug,
   requireString,
@@ -115,7 +116,7 @@ interface ManagedLanguageRow {
   search_count: number;
 }
 
-export const KUROCMS_VERSION = "1.7.4";
+export const KUROCMS_VERSION = "1.7.7";
 const KUROCMS_GITHUB_REPO = "Kuro-Boo/KuroCMS";
 const KUROCMS_COMMUNITY_BASE_URL = "https://kuro.boo/kurocms";
 
@@ -316,6 +317,66 @@ export async function handleApi(
     if (request.method === "POST" && path === "/api/system/custom-domains") {
       requireAdmin(user);
       return withJsonHeaders(await addCustomDomain(request, env));
+    }
+
+    // ── Backup / Restore (client-orchestrated streaming ZIP) ──────────────
+    if (request.method === "GET" && path === "/api/system/backup/manifest") {
+      requireAdmin(user);
+      return withJsonHeaders(await backupManifest(env));
+    }
+    const backupTableMatch = path.match(
+      /^\/api\/system\/backup\/table\/([a-z_]+)$/,
+    );
+    if (request.method === "GET" && backupTableMatch) {
+      requireAdmin(user);
+      return withJsonHeaders(await backupTable(env, backupTableMatch[1], url));
+    }
+    const backupMediaMatch = path.match(
+      /^\/api\/system\/backup\/media\/([^/]+)$/,
+    );
+    if (request.method === "GET" && backupMediaMatch) {
+      requireAdmin(user);
+      return await backupMedia(env, backupMediaMatch[1]);
+    }
+    if (request.method === "POST" && path === "/api/system/restore/wipe-db") {
+      requireAdmin(user);
+      return withJsonHeaders(await restoreWipeDb(env));
+    }
+    if (
+      request.method === "POST" &&
+      path === "/api/system/restore/wipe-media"
+    ) {
+      requireAdmin(user);
+      return withJsonHeaders(await restoreWipeMedia(env, url));
+    }
+    if (
+      request.method === "POST" &&
+      path === "/api/system/restore/wipe-pages"
+    ) {
+      requireAdmin(user);
+      return withJsonHeaders(await restoreWipePages(env, url));
+    }
+    const restoreTableMatch = path.match(
+      /^\/api\/system\/restore\/table\/([a-z_]+)$/,
+    );
+    if (request.method === "POST" && restoreTableMatch) {
+      requireAdmin(user);
+      return withJsonHeaders(
+        await restoreTable(request, env, restoreTableMatch[1]),
+      );
+    }
+    const restoreMediaMatch = path.match(
+      /^\/api\/system\/restore\/media\/([^/]+)$/,
+    );
+    if (request.method === "POST" && restoreMediaMatch) {
+      requireAdmin(user);
+      return withJsonHeaders(
+        await restoreMedia(request, env, restoreMediaMatch[1]),
+      );
+    }
+    if (request.method === "POST" && path === "/api/system/restore/finish") {
+      requireAdmin(user);
+      return withJsonHeaders(await restoreFinish(env));
     }
 
     if (request.method === "POST" && path === "/api/auth/logout") {
@@ -2067,8 +2128,22 @@ async function systemStorage(env: Env): Promise<Response> {
     ),
   ).toISOString();
 
+  // R2 availability: a present MEDIA_BUCKET binding is not enough — the binding
+  // object stays truthy even after the R2 subscription is cancelled or the
+  // bucket is deleted in the CF dashboard. Probe with a lightweight Class-B
+  // list() and treat any failure as "R2 unavailable" so the dashboard grays out.
+  let r2Available = false;
+  if (env.MEDIA_BUCKET) {
+    try {
+      await (env.MEDIA_BUCKET as R2Bucket).list({ limit: 1 });
+      r2Available = true;
+    } catch {
+      r2Available = false;
+    }
+  }
+
   return json({
-    r2Available: !!env.MEDIA_BUCKET,
+    r2Available,
     d1: {
       usedBytes: d1Bytes,
       maxBytes: FREE_D1_BYTES,
@@ -6082,6 +6157,231 @@ async function createMediaAsset(
     { pid: mid, mid, publicPath, url: `${publicPath}?v=${version}` },
     { status: 201 },
   );
+}
+
+// ── Backup / Restore ─────────────────────────────────────────────────────────
+// Content + settings + media binaries are exported as a ZIP assembled client-side
+// (see src/admin/lib/zipstore.ts). Auth/secret tables are intentionally excluded.
+// Tables are listed in INSERT order (parents → children) so a full-replace restore
+// can re-insert without tripping references; deletion walks the reverse order.
+const BACKUP_TABLES_INSERT_ORDER = [
+  "site_settings",
+  "page_templates",
+  "external_connections", // SNS連携（[[sid]] ウィジェット / SNS投稿）。トークンを含む
+  "categories",
+  "taxonomy_items",
+  "documents",
+  "media_assets",
+  "document_categories",
+  "document_translations",
+  "document_translation_revisions",
+  "search_entries",
+];
+const BACKUP_TABLE_SET = new Set(BACKUP_TABLES_INSERT_ORDER);
+const BACKUP_PAGE_SIZE = 500;
+const RESTORE_KV_WIPE_PAGE = 500; // each KV delete is a subrequest — stay < 1000
+const RESTORE_R2_WIPE_PAGE = 1000; // R2 delete takes an array (one subrequest)
+
+async function backupManifest(env: Env): Promise<Response> {
+  const tables: { name: string; count: number }[] = [];
+  for (const name of BACKUP_TABLES_INSERT_ORDER) {
+    const row = await env.DB.prepare(
+      `SELECT COUNT(*) AS c FROM ${name}`,
+    ).first<{ c: number }>();
+    tables.push({ name, count: Number(row?.c ?? 0) });
+  }
+  const m = await env.DB.prepare(
+    "SELECT COUNT(*) AS c, COALESCE(SUM(size_bytes),0) AS b FROM media_assets",
+  ).first<{ c: number; b: number }>();
+  return json({
+    format: "kurocms.full.v1",
+    kurocmsVersion: KUROCMS_VERSION,
+    createdAt: nowIso(),
+    tables: tables as unknown as JsonValue,
+    media: { count: Number(m?.c ?? 0), totalBytes: Number(m?.b ?? 0) },
+  });
+}
+
+async function backupTable(
+  env: Env,
+  name: string,
+  url: URL,
+): Promise<Response> {
+  if (!BACKUP_TABLE_SET.has(name)) {
+    throw new HttpError(400, "bad_table", `Unknown table: ${name}`);
+  }
+  const cursor = Math.max(
+    0,
+    parseInt(url.searchParams.get("cursor") || "0", 10) || 0,
+  );
+  const res = await env.DB.prepare(
+    `SELECT * FROM ${name} ORDER BY rowid LIMIT ? OFFSET ?`,
+  )
+    .bind(BACKUP_PAGE_SIZE + 1, cursor)
+    .all();
+  const rows = (res.results ?? []) as Record<string, unknown>[];
+  const hasMore = rows.length > BACKUP_PAGE_SIZE;
+  if (hasMore) rows.pop();
+  return json({
+    rows: rows as unknown as JsonValue,
+    nextCursor: hasMore ? cursor + BACKUP_PAGE_SIZE : null,
+  });
+}
+
+async function backupMedia(env: Env, mid: string): Promise<Response> {
+  if (!env.MEDIA_BUCKET) {
+    throw new HttpError(
+      503,
+      "r2_not_configured",
+      "R2 storage is not configured.",
+    );
+  }
+  const row = await env.DB.prepare(
+    "SELECT public_path, mime FROM media_assets WHERE mid = ?",
+  )
+    .bind(mid)
+    .first<{ public_path: string; mime: string }>();
+  if (!row) return jsonError(404, "not_found", "Media asset not found.");
+  const key = row.public_path.replace(/^\//, "");
+  let obj: R2ObjectBody | null;
+  try {
+    obj = await (env.MEDIA_BUCKET as R2Bucket).get(key);
+  } catch {
+    obj = null;
+  }
+  if (!obj) return jsonError(404, "not_found", "Media object missing in R2.");
+  return new Response(obj.body, {
+    headers: { "content-type": row.mime || "application/octet-stream" },
+  });
+}
+
+async function restoreWipeDb(env: Env): Promise<Response> {
+  const stmts = [...BACKUP_TABLES_INSERT_ORDER]
+    .reverse()
+    .map((n) => env.DB.prepare(`DELETE FROM ${n}`));
+  await env.DB.batch(stmts);
+  // page_build_cache is a derived cache; clear it so a later build won't skip.
+  await env.DB.prepare("DELETE FROM page_build_cache")
+    .run()
+    .catch(() => {});
+  return json({ ok: true });
+}
+
+async function restoreWipeMedia(env: Env, url: URL): Promise<Response> {
+  if (!env.MEDIA_BUCKET) return json({ ok: true, done: true, cursor: null });
+  const cursor = url.searchParams.get("cursor") || undefined;
+  const listed = await (env.MEDIA_BUCKET as R2Bucket).list({
+    limit: RESTORE_R2_WIPE_PAGE,
+    cursor,
+  });
+  const keys = listed.objects.map((o) => o.key);
+  if (keys.length) await (env.MEDIA_BUCKET as R2Bucket).delete(keys);
+  return json({
+    ok: true,
+    done: !listed.truncated,
+    cursor: listed.truncated
+      ? ((listed as { cursor?: string }).cursor ?? null)
+      : null,
+    deleted: keys.length,
+  });
+}
+
+async function restoreWipePages(env: Env, url: URL): Promise<Response> {
+  if (!env.PUBLIC_PAGES) return json({ ok: true, done: true, cursor: null });
+  const cursor = url.searchParams.get("cursor") || undefined;
+  const listed = await env.PUBLIC_PAGES.list({
+    limit: RESTORE_KV_WIPE_PAGE,
+    cursor,
+  });
+  for (const k of listed.keys) {
+    await env.PUBLIC_PAGES.delete(k.name);
+  }
+  const done = listed.list_complete;
+  return json({
+    ok: true,
+    done,
+    cursor: done ? null : ((listed as { cursor?: string }).cursor ?? null),
+    deleted: listed.keys.length,
+  });
+}
+
+async function restoreTable(
+  request: Request,
+  env: Env,
+  name: string,
+): Promise<Response> {
+  if (!BACKUP_TABLE_SET.has(name)) {
+    throw new HttpError(400, "bad_table", `Unknown table: ${name}`);
+  }
+  const body = (await request.json()) as { rows?: Record<string, unknown>[] };
+  const rows = body.rows ?? [];
+  if (!rows.length) return json({ ok: true, inserted: 0 });
+  const stmts = rows.map((row) => {
+    const cols = Object.keys(row);
+    if (!cols.length) {
+      throw new HttpError(400, "bad_row", "Empty row in restore payload.");
+    }
+    const sql = `INSERT OR REPLACE INTO ${name} (${cols
+      .map((c) => `"${c}"`)
+      .join(",")}) VALUES (${cols.map(() => "?").join(",")})`;
+    return env.DB.prepare(sql).bind(
+      ...cols.map((c) => normalizeRestoreValue(row[c])),
+    );
+  });
+  await env.DB.batch(stmts);
+  return json({ ok: true, inserted: rows.length });
+}
+
+// D1 bind accepts string | number | null | ArrayBuffer. Backup JSON only carries
+// scalars from SELECT *, but normalize defensively (bool → int, undefined → null).
+function normalizeRestoreValue(v: unknown): string | number | null {
+  if (v === undefined || v === null) return null;
+  if (typeof v === "boolean") return v ? 1 : 0;
+  if (typeof v === "number" || typeof v === "string") return v;
+  return JSON.stringify(v);
+}
+
+async function restoreMedia(
+  request: Request,
+  env: Env,
+  mid: string,
+): Promise<Response> {
+  if (!env.MEDIA_BUCKET) {
+    throw new HttpError(
+      503,
+      "r2_not_configured",
+      "R2 storage is not configured.",
+    );
+  }
+  const row = await env.DB.prepare(
+    "SELECT public_path, mime FROM media_assets WHERE mid = ?",
+  )
+    .bind(mid)
+    .first<{ public_path: string; mime: string }>();
+  if (!row) {
+    return jsonError(
+      404,
+      "not_found",
+      "Media row missing — restore tables before media.",
+    );
+  }
+  if (!request.body) {
+    throw new HttpError(400, "missing_body", "No file body provided.");
+  }
+  const key = row.public_path.replace(/^\//, "");
+  await (env.MEDIA_BUCKET as R2Bucket).put(key, request.body, {
+    httpMetadata: { contentType: row.mime || "application/octet-stream" },
+  });
+  return json({ ok: true, mid });
+}
+
+async function restoreFinish(env: Env): Promise<Response> {
+  // Public pages were wiped from KV; drop the version cache so the next visit /
+  // build regenerates everything from the restored D1 data.
+  if (env.PUBLIC_PAGES) {
+    await env.PUBLIC_PAGES.delete(LATEST_VERSION_CACHE_KEY).catch(() => {});
+  }
+  return json({ ok: true });
 }
 
 async function createBackup(env: Env): Promise<Response> {
