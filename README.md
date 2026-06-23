@@ -1,63 +1,80 @@
-# KuroCMS
+<div align="center">
 
-KuroCMS is a lightweight, headless CMS designed to run on the Cloudflare global
-network. It bridges structured content management and high-performance static
-delivery on Workers, D1, KV, and R2.
+# 🐰 KuroCMS
+
+**The Cloudflare-native, ultra-fast headless CMS — run a multilingual blog for ¥0.**
+
+[![Latest release](https://img.shields.io/github/v/release/Kuro-Boo/KuroCMS-releases?label=release&color=157a6e)](https://github.com/Kuro-Boo/KuroCMS-releases/releases)
+[![License: Kuro License](https://img.shields.io/badge/license-Kuro%20License-blue)](./LICENSE.txt)
+
+[**🚀 Install**](https://kuro.boo/kurocms) ・ [**📖 Read the story (EN)**](https://kuro.boo/blog/kurocms-003/?lang=en) ・ [**🏷️ Releases**](https://github.com/Kuro-Boo/KuroCMS-releases/releases) ・ [**🔒 Security**](./SECURITY.md)
+
+</div>
 
 ![KuroCMS admin — article management](docs/admin-screenshot.jpg)
 
-> The article management screen of the KuroCMS admin (multilingual, per-article SNS publish state, one-click build).
+> KuroCMS admin · article management — multilingual, per‑article SNS publish state, and one‑click build.
 
-## About this repository
+KuroCMS is a lightweight headless CMS that runs **entirely on the Cloudflare global
+network** (Workers + D1 + KV + R2). It pairs a polished admin with high‑performance
+edge delivery — and is designed so a typical blog runs comfortably **within
+Cloudflare's free tier**.
 
-This repository publishes the **core source code of KuroCMS for transparency** —
-so anyone (especially the security-minded) can review what the software actually
-does. **You do not build or deploy from this repository.**
+## ✨ Why KuroCMS
 
-- **To install KuroCMS**, use the web installer:
-  **<https://kuro.boo/kurocms>**
-  It provisions D1 / KV / R2 / Worker into your own Cloudflare account directly
-  from the browser — no local build or CLI required.
-- **Release history** — versions, change notes, and the built `worker.js` — is on
-  the [Releases](https://github.com/Kuro-Boo/KuroCMS-releases/releases) page.
+- 🚀 **Cloudflare‑native & fast** — Workers + D1 + KV + R2, edge‑cached static delivery.
+- 💸 **Runs for ¥0** — built around Cloudflare's free tier: no rental server, no DB ops.
+- 🧩 **PC‑free web installer** — provisions D1 / KV / R2 / Worker into *your* Cloudflare account straight from the browser. No CLI, no build.
+- 🌐 **Multilingual by design** — one shared article identity, per‑language static output, AI‑friendly translation API.
+- ✍️ **Rich WYSIWYG editor (KuroEditor)** — callouts, round boxes, tables, media — with **passkey (WebAuthn)** sign‑in and multi‑device recovery.
+- 🎨 **Community templates** — pick a shareable template and make it yours.
+- 🤖 **AI‑ready REST API** — clean JSON endpoints for automation and translation.
+- 🔑 **Zero runtime dependencies** — vanilla TypeScript on the Workers runtime.
 
-What is published here:
+## 🚀 Get started
+
+KuroCMS installs into **your own** Cloudflare account from the browser — no PC setup, no CLI, no build:
+
+### → [Open the web installer at kuro.boo/kurocms](https://kuro.boo/kurocms)
+
+Want the backstory and a feature tour? Read
+**[“Finally Released! Development of a New Headless CMS Vol. 3” (English)](https://kuro.boo/blog/kurocms-003/?lang=en)**.
+
+## 🛠️ Tech stack
+
+- **Runtime**: [Cloudflare Workers](https://workers.cloudflare.com/)
+- **Database**: [Cloudflare D1](https://developers.cloudflare.com/d1/)
+- **Storage**: Cloudflare KV (rendered pages) + R2 (media)
+- **Language**: TypeScript — **no framework, zero runtime dependencies**
+
+## 📦 About this repository
+
+This repository publishes the **core source code of KuroCMS for transparency** — so
+anyone (especially the security‑minded) can review what the software actually does.
+**You don't build or deploy from here** — installation is the one‑click web installer
+above.
 
 | Path | Contents |
 |---|---|
 | `src/` | Cloudflare Worker source (the CMS itself) |
 | `migrations/` | D1 database schema migrations |
 
-Build tooling, configuration, dependencies, and maintainer scripts are
-intentionally omitted — this is a source-review mirror, not a build target.
-
-## ✨ Key Features
-
-- 🚀 **Cloudflare Native** — built from the ground up for Workers and the D1 database.
-- 🌐 **Multilingual by Design** — shared article identities with language-specific static output.
-- 🤖 **AI-Ready API** — clean JSON REST endpoints optimized for AI translation and automation.
-- ✍️ **Rich Editor** — web-based WYSIWYG editor with HTML body storage.
-- 🛡️ **Flexible Permissions** — simple `admin` and `author` roles.
-- 📦 **Personal First** — professional-grade power for individual creators.
-
-## 🛠️ Tech Stack
-
-- **Runtime**: [Cloudflare Workers](https://workers.cloudflare.com/)
-- **Database**: [Cloudflare D1](https://developers.cloudflare.com/d1/)
-- **Storage**: Cloudflare KV (rendered pages) + R2 (media)
-- **Language**: TypeScript
+Release history — versions, change notes, and the built `worker.js` — lives on the
+[Releases](https://github.com/Kuro-Boo/KuroCMS-releases/releases) page. Build tooling,
+configuration, and maintainer scripts are intentionally omitted (source‑review mirror,
+not a build target).
 
 ## 🔒 Security
 
-Found a vulnerability? Please see [SECURITY.md](./SECURITY.md) for private
-reporting instructions. Do not file public issues for security problems.
+Found a vulnerability? Please see [SECURITY.md](./SECURITY.md) for private reporting
+instructions. Do not file public issues for security problems.
 
 ## ⚖️ License
 
-KuroCMS is licensed under the **Kuro License** (an MIT-based license with an
+KuroCMS is licensed under the **Kuro License** (an MIT‑based license with an
 attribution requirement).
 
-> When the Software is used to provide a public-facing interface, the phrase
-> **"with KuroCMS"** must be shown in an appropriate attribution area.
+> When the Software is used to provide a public‑facing interface, the phrase
+> **“with KuroCMS”** must be shown in an appropriate attribution area.
 
 See [LICENSE.txt](./LICENSE.txt) for the full text.
