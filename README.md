@@ -4,6 +4,10 @@ KuroCMS is a lightweight, headless CMS designed to run on the Cloudflare global
 network. It bridges structured content management and high-performance static
 delivery on Workers, D1, KV, and R2.
 
+![KuroCMS admin — article management](docs/admin-screenshot.jpg)
+
+> The article management screen of the KuroCMS admin (multilingual, per-article SNS publish state, one-click build).
+
 ## About this repository
 
 This repository publishes the **core source code of KuroCMS for transparency** —

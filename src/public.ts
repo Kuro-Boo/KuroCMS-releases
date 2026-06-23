@@ -19,7 +19,7 @@ import type { Env } from "./types";
 // can't see (e.g. the <head> content-CSS <link>, template-model shape). The
 // build salts every page hash with this, so cached builds are invalidated and
 // all pages regenerate even when their underlying content is unchanged.
-const RENDER_FORMAT_VERSION = "11";
+const RENDER_FORMAT_VERSION = "12";
 
 /** Cheap, synchronous string hash (FNV-1a, base36) for cache keys. Not crypto. */
 function cheapHash(s: string): string {
@@ -923,6 +923,12 @@ async function buildRenderContext(
     prefetch,
   );
 
+  // The About page body is authored rich content too — wrap it like the article
+  // body so callouts/roundboxes render on the public page.
+  if (content["about-body"]) {
+    content["about-body"] = wrapKuroContent(content["about-body"]);
+  }
+
   content["_site-name"] = settings.site_name || "";
   content["_nav-types"] = JSON.stringify(types);
   content["_nav-categories"] = JSON.stringify(categories);
@@ -984,7 +990,7 @@ async function buildRenderContext(
       type: r.tid,
       title: r.title || r.slug,
       summary: r.summary || "",
-      bodyHtml: expandedBody.body || "",
+      bodyHtml: wrapKuroContent(expandedBody.body || ""),
       publishAt: r.publish_at,
       updatedAt: r.updated_at,
       coverUrl: articleCover,
@@ -1555,6 +1561,18 @@ function adminAssetBase(env: Env): string {
  * serveAdminAsset from KV/edge/release) so authored content renders on any
  * template. The file is immutable (version-pinned) and cached aggressively.
  */
+/**
+ * Wrap authored rich-body HTML in `.kuro-content` so KuroEditor's published
+ * content styles (callouts, roundboxes, tables, list markers…) apply on the
+ * public site. ke-content.css scopes those rules under `.kuro-content` (and is
+ * unlayered so it beats the template's `.prose`); without this wrapper a callout
+ * renders as plain text. Mirrors how the in-editor preview wraps content.
+ */
+function wrapKuroContent(html: string): string {
+  const h = (html || "").trim();
+  return h ? `<div class="kuro-content">${html}</div>` : "";
+}
+
 function injectContentStyles(html: string, basePath: string): string {
   const link =
     '<link rel="stylesheet" href="' +
