@@ -4,10 +4,10 @@
 
 **The Cloudflare-native, ultra-fast headless CMS — run a multilingual blog for ¥0.**
 
-[![Latest release](https://img.shields.io/github/v/release/Kuro-Boo/KuroCMS-releases?label=release&color=157a6e)](https://github.com/Kuro-Boo/KuroCMS-releases/releases)
+[![Latest release](https://img.shields.io/github/v/release/Kuro-Boo/KuroCMS?label=release&color=157a6e)](https://github.com/Kuro-Boo/KuroCMS/releases)
 [![License: Kuro License](https://img.shields.io/badge/license-Kuro%20License-blue)](./LICENSE.txt)
 
-[**🚀 Install**](https://kuro.boo/kurocms) ・ [**📖 Read the story (EN)**](https://kuro.boo/blog/kurocms-003/?lang=en) ・ [**🏷️ Releases**](https://github.com/Kuro-Boo/KuroCMS-releases/releases) ・ [**🔒 Security**](./SECURITY.md)
+[**🚀 Install**](https://kuro.boo/kurocms) ・ [**📖 Read the story (EN)**](https://kuro.boo/blog/kurocms-003/?lang=en) ・ [**🏷️ Releases**](https://github.com/Kuro-Boo/KuroCMS/releases) ・ [**🔒 Security**](./SECURITY.md)
 
 </div>
 
@@ -60,7 +60,7 @@ above.
 | `migrations/` | D1 database schema migrations |
 
 Release history — versions, change notes, and the built `worker.js` — lives on the
-[Releases](https://github.com/Kuro-Boo/KuroCMS-releases/releases) page. Build tooling,
+[Releases](https://github.com/Kuro-Boo/KuroCMS/releases) page. Build tooling,
 configuration, and maintainer scripts are intentionally omitted (source‑review mirror,
 not a build target).
 
