@@ -14,21 +14,17 @@ async function loginScreen(errorMsg = "") {
     "<div class='toolbar' style='justify-content:center'><button id='passkeyLoginBtn' style='min-width:220px'>" +
     escapeHtml(t("loginWithPasskey")) +
     "</button></div>" +
-    "<div style='text-align:center;margin-top:14px'><a href='#' id='recoverLink' style='font-size:13px;color:var(--muted)'>" +
-    escapeHtml(t("lostDevice")) +
-    "</a></div>" +
-    "<form id='recoverForm' class='stack' style='display:none;margin-top:12px;gap:8px'><div class='muted' style='font-size:13px'>" +
+    // ── 新しくデバイスを登録する場合（メールのワンタイムリンク）— 常時表示 ──
+    "<div style='margin-top:18px;padding-top:16px;border-top:1px solid var(--border,#2a2f3a)'><div style='font-weight:600;margin-bottom:6px'>" +
+    escapeHtml(t("loginNewDeviceTitle")) +
+    "</div><div class='muted' style='font-size:13px;margin-bottom:8px'>" +
     escapeHtml(t("recoverRequestLead")) +
-    "</div><input id='recoverEmail' type='email' autocomplete='username' placeholder='admin@example.com' /><button type='submit'>" +
+    "</div><form id='recoverForm' class='stack' style='gap:8px'><input id='recoverEmail' type='email' autocomplete='username' placeholder='admin@example.com' /><button type='submit'>" +
     escapeHtml(t("recoverSendLink")) +
-    "</button><div id='recoverReqStatus'></div></form>" +
+    "</button><div id='recoverReqStatus'></div></form><div class='muted' style='font-size:12px;margin-top:10px;line-height:1.6'>" +
+    escapeHtml(t("loginNewDeviceAfter")) +
+    "</div></div>" +
     "</div></div></section>";
-  byId("recoverLink")?.addEventListener("click", (e: Dynamic) => {
-    e.preventDefault();
-    const form = byId("recoverForm");
-    if (form)
-      form.style.display = form.style.display === "none" ? "flex" : "none";
-  });
   byId("recoverForm")?.addEventListener("submit", async (e: Dynamic) => {
     e.preventDefault();
     const btn = e.submitter || e.target.querySelector("button[type=submit]");

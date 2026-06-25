@@ -814,6 +814,9 @@ const i18n = {
     loginTitle: "Login",
     loginLead: "Use your passkey to continue.",
     loginWithPasskey: "Login with Passkey",
+    loginNewDeviceTitle: "Register a new device",
+    loginNewDeviceAfter:
+      "After you submit, open the one-time link in the email (valid for 30 minutes, single use) to register a new passkey on this device. Once it is registered, sign in with “Login with Passkey”.",
     registerPasskey: "Register Passkey",
     registeringPasskey: "Registering...",
     lostDevice: "Lost your device?",
@@ -1658,6 +1661,9 @@ const i18n = {
     loginTitle: "ログイン",
     loginLead: "パスキーでログインしてください。",
     loginWithPasskey: "パスキーでログイン",
+    loginNewDeviceTitle: "新しくデバイスを登録する場合",
+    loginNewDeviceAfter:
+      "送信後、届いたメールのワンタイムリンク（30分間有効・1回のみ）を開くと、このデバイスに新しいパスキーを登録できます。登録が完了すると、以降は「パスキーでログイン」からサインインできます。",
     registerPasskey: "パスキーを登録",
     registeringPasskey: "登録中...",
     lostDevice: "デバイスを紛失した場合",
