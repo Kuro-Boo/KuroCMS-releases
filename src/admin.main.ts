@@ -608,6 +608,11 @@ const i18n = {
     profileApiAccessLead:
       "Create a PAT for REST API access from AI tools, scripts, and external services.",
     createPatAction: "Create New Personal Access Token",
+    mcpConnectTitle: "Connect AI (MCP)",
+    mcpConnectLead:
+      "This site also runs an MCP server, so Claude / Claude Code can manage articles conversationally. Point your AI client at the endpoint below and use a PAT (created here) as the Bearer token.",
+    mcpEndpointLabel: "MCP endpoint (this site)",
+    mcpConfigLabel: "Claude Code — copy & paste (replace kuro_… with your PAT)",
     account: "Account",
     uid: "User ID",
     email: "Email",
@@ -1421,6 +1426,11 @@ const i18n = {
     profileApiAccessLead:
       "REST APIでアクセスするためにPAT（Personal Access Token）を作成します。主にAIなどから利用されます。/api/help にアクセスするとREST API の使い方の説明が表示されます。",
     createPatAction: "新規Personal Access Tokenを作成",
+    mcpConnectTitle: "AI 連携（MCP）",
+    mcpConnectLead:
+      "このサイトは MCP サーバーも備えており、Claude / Claude Code から会話的に記事を管理できます。AI クライアントに下の接続先を設定し、ここで作る PAT を Bearer トークンとして使います。",
+    mcpEndpointLabel: "接続先エンドポイント（このサイト）",
+    mcpConfigLabel: "Claude Code 設定（コピペ・kuro_… を自分の PAT に置換）",
     account: "アカウント",
     uid: "ユーザーID",
     email: "メール",

@@ -1,6 +1,13 @@
 // KuroCMS admin screen module. Concatenated by scripts/build-admin.js.
 
 async function profile() {
+  // MCP endpoint for THIS instance. withBase() yields the same base the admin
+  // uses for its own API calls, so this is correct regardless of basePath.
+  const mcpUrl = new URL(withBase("/api/mcp"), location.origin).href;
+  const mcpCmd =
+    "claude mcp add --transport http kurocms " +
+    mcpUrl +
+    ' --header "Authorization: Bearer kuro_<PAT>"';
   shell(
     t("profile"),
     "<div class='grid two profileGrid'><div class='stack'><div class='panel stack'><h3>" +
@@ -46,7 +53,26 @@ async function profile() {
       escapeHtml(t("profileApiAccess")) +
       "</h3><p class='muted' style='margin:-4px 0 2px'>" +
       escapeHtml(t("profileApiAccessLead")) +
-      "</p><form class='toolbar' id='tokenForm'><button>" +
+      "</p>" +
+      // ── MCP connect (endpoint URL + copy-paste client config) ──────────
+      "<div class='stack' style='gap:6px;margin:2px 0 12px;padding:10px 12px;border:1px solid var(--border,#2a2f3a);border-radius:8px'><div class='tokenMeta'><b>" +
+      escapeHtml(t("mcpConnectTitle")) +
+      "</b></div><div class='tokenHelp'>" +
+      escapeHtml(t("mcpConnectLead")) +
+      "</div><div class='tokenLabel'>" +
+      escapeHtml(t("mcpEndpointLabel")) +
+      "</div><div class='tokenOutputRow'><div id='mcpEndpoint' class='tokenBox' style='font-size:11px;font-family:ui-monospace,monospace;word-break:break-all'>" +
+      escapeHtml(mcpUrl) +
+      "</div><button type='button' class='secondary' id='copyMcpUrl'>" +
+      escapeHtml(t("copy")) +
+      "</button></div><div class='tokenLabel'>" +
+      escapeHtml(t("mcpConfigLabel")) +
+      "</div><div class='tokenOutputRow'><div id='mcpConfig' class='tokenBox' style='font-size:11px;font-family:ui-monospace,monospace;white-space:pre-wrap;word-break:break-all'>" +
+      escapeHtml(mcpCmd) +
+      "</div><button type='button' class='secondary' id='copyMcpConfig'>" +
+      escapeHtml(t("copy")) +
+      "</button></div></div>" +
+      "<form class='toolbar' id='tokenForm'><button>" +
       escapeHtml(t("createPatAction")) +
       "</button></form><div class='stack' style='gap:8px'><div class='tokenLabel'>" +
       escapeHtml(t("generatedToken")) +
@@ -210,6 +236,22 @@ async function profile() {
     if (!value || value === "-") return;
     try {
       await navigator.clipboard.writeText(value);
+      toast(t("copySuccess"), false, event.currentTarget);
+    } catch {
+      toast(t("copyFailed"), true, event.currentTarget);
+    }
+  });
+  byId("copyMcpUrl")?.addEventListener("click", async (event: Dynamic) => {
+    try {
+      await navigator.clipboard.writeText(mcpUrl);
+      toast(t("copySuccess"), false, event.currentTarget);
+    } catch {
+      toast(t("copyFailed"), true, event.currentTarget);
+    }
+  });
+  byId("copyMcpConfig")?.addEventListener("click", async (event: Dynamic) => {
+    try {
+      await navigator.clipboard.writeText(mcpCmd);
       toast(t("copySuccess"), false, event.currentTarget);
     } catch {
       toast(t("copyFailed"), true, event.currentTarget);
