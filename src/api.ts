@@ -117,7 +117,7 @@ interface ManagedLanguageRow {
   search_count: number;
 }
 
-export const KUROCMS_VERSION = "1.7.24";
+export const KUROCMS_VERSION = "1.7.26";
 const KUROCMS_GITHUB_REPO = "Kuro-Boo/KuroCMS";
 const KUROCMS_COMMUNITY_BASE_URL = "https://kuro.boo/kurocms";
 
@@ -1849,8 +1849,11 @@ async function createInvitation(
 async function listUsers(env: Env, user: AuthUser): Promise<Response> {
   requireAdmin(user);
   const rows = await env.DB.prepare(
-    `SELECT uid, email, display_name, author_id, is_admin, is_author, disabled_at, created_at, updated_at
-     FROM users ORDER BY created_at ASC`,
+    `SELECT users.uid, users.email, users.display_name, users.author_id,
+            users.is_admin, users.is_author, users.disabled_at,
+            users.created_at, users.updated_at,
+            (SELECT MAX(p.last_used_at) FROM passkey_credentials p WHERE p.uid = users.uid) AS last_login_at
+     FROM users ORDER BY users.created_at ASC`,
   ).all<Record<string, unknown>>();
   return json({ users: rows.results as JsonValue });
 }

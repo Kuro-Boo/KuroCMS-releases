@@ -60,6 +60,7 @@ type KuroEditorInstance = {
   getContent(): string;
   setContent(html: string): void;
   wysiwyg: HTMLElement;
+  sourceArea: HTMLTextAreaElement;
   mmenu: HTMLElement;
   root: HTMLElement;
 };
@@ -1291,6 +1292,7 @@ const i18n = {
     copyAndClose: "Copy & Close",
     userStatus: "Status",
     registeredDate: "Registered",
+    lastLoginDate: "Last login",
     noRole: "No Role",
     disableAccount: "Disable Account",
     tokenDeleteConfirm: "Delete this token? This cannot be undone.",
@@ -2146,6 +2148,7 @@ const i18n = {
     copyAndClose: "コピーして閉じる",
     userStatus: "状態",
     registeredDate: "登録日",
+    lastLoginDate: "最終ログイン",
     noRole: "権限なし",
     disableAccount: "アカウント無効化",
     tokenDeleteConfirm: "このトークンを削除しますか？削除後は元に戻せません。",
