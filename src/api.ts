@@ -117,7 +117,7 @@ interface ManagedLanguageRow {
   search_count: number;
 }
 
-export const KUROCMS_VERSION = "1.7.23";
+export const KUROCMS_VERSION = "1.7.24";
 const KUROCMS_GITHUB_REPO = "Kuro-Boo/KuroCMS";
 const KUROCMS_COMMUNITY_BASE_URL = "https://kuro.boo/kurocms";
 
@@ -1618,7 +1618,11 @@ async function passkeyRegisterComplete(
       .run();
   }
 
-  const sessionId = await createSession(env, resolvedUid);
+  const sessionId = await createSession(
+    env,
+    resolvedUid,
+    verifyResult.credentialId,
+  );
   const secure = new URL(request.url).protocol === "https:";
 
   const resp = json({ ok: true, uid: resolvedUid, email: resolvedEmail });
@@ -1770,7 +1774,11 @@ async function passkeyLoginComplete(
     .bind(verifyResult.newSignCount, now, passkeyRow.credential_id)
     .run();
 
-  const sessionId = await createSession(env, passkeyRow.uid);
+  const sessionId = await createSession(
+    env,
+    passkeyRow.uid,
+    passkeyRow.credential_id,
+  );
   const secure = new URL(request.url).protocol === "https:";
 
   const resp = json({ ok: true, uid: passkeyRow.uid, email: userRow.email });
@@ -3605,7 +3613,14 @@ async function listMyPasskeys(env: Env, user: AuthUser): Promise<Response> {
   )
     .bind(user.uid)
     .all<Record<string, unknown>>();
-  return json({ passkeys: rows.results as JsonValue });
+  // Mark the credential that authenticated the current session.
+  const passkeys = (rows.results as Record<string, unknown>[]).map((r) => ({
+    ...r,
+    current: Boolean(
+      user.currentCredentialId && r.credential_id === user.currentCredentialId,
+    ),
+  }));
+  return json({ passkeys: passkeys as JsonValue });
 }
 
 /** Rename one of the signed-in user's passkeys (display label only). */

@@ -337,7 +337,13 @@ async function profile() {
           return (
             "<div class='tokenRow'><div><b>" +
             escapeHtml(pk.display_name || t("passkeyDevices")) +
-            "</b><div class='tokenMeta'>" +
+            "</b>" +
+            (pk.current
+              ? " <span class='tokenMeta' style='color:var(--brand,#157a6e);font-weight:600'>（" +
+                escapeHtml(t("passkeyCurrent")) +
+                "）</span>"
+              : "") +
+            "<div class='tokenMeta'>" +
             meta +
             "</div></div><div style='display:flex;gap:6px'>" +
             "<button class='secondary' data-rename-passkey='" +

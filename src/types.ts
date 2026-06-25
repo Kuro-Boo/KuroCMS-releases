@@ -32,6 +32,8 @@ export interface AuthUser {
   isAuthor: boolean;
   tokenId?: string;
   sessionId?: string;
+  /** Passkey credential that authenticated the current session (if any). */
+  currentCredentialId?: string | null;
   authSource?: "local" | "pat" | "session";
 }
 
