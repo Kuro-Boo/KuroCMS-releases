@@ -117,7 +117,7 @@ interface ManagedLanguageRow {
   search_count: number;
 }
 
-export const KUROCMS_VERSION = "1.7.27";
+export const KUROCMS_VERSION = "1.7.28";
 const KUROCMS_GITHUB_REPO = "Kuro-Boo/KuroCMS";
 const KUROCMS_COMMUNITY_BASE_URL = "https://kuro.boo/kurocms";
 
@@ -4719,12 +4719,25 @@ async function nextMediaId(
   kind: "image" | "video" | "audio",
 ): Promise<string> {
   const prefix = kind === "image" ? "img" : kind === "video" ? "vid" : "aud";
-  const row = await env.DB.prepare(
-    "SELECT COUNT(*) AS cnt FROM media_assets WHERE kind = ?",
+  // Derive the next number from the HIGHEST existing id, NOT COUNT(*): deleting a
+  // media row (e.g. the orphan-cleanup) leaves a gap, so COUNT+1 would land on an
+  // id that still exists and fail the `mid` UNIQUE constraint on INSERT. Parse the
+  // trailing number off each mid of this kind. Current ids look like "img-163";
+  // legacy ones used an underscore ("img_146") — `(\d+)$` covers both.
+  const rows = await env.DB.prepare(
+    "SELECT mid FROM media_assets WHERE kind = ?",
   )
     .bind(kind)
-    .first<{ cnt: number }>();
-  const n = (row?.cnt ?? 0) + 1;
+    .all<{ mid: string }>();
+  let max = 0;
+  for (const r of rows.results) {
+    const m = /(\d+)$/.exec(r.mid || "");
+    if (m) {
+      const num = parseInt(m[1], 10);
+      if (num > max) max = num;
+    }
+  }
+  const n = max + 1;
   // Hyphen separator for consistency with all other [[...]] tokens (content
   // keys, SNS ids). The [[...]] parser accepts both, but we standardize on "-".
   return `${prefix}-${String(n).padStart(3, "0")}`;

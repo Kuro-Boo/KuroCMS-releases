@@ -43,7 +43,19 @@ function byId(id: string): AdminElement | null {
 }
 
 function errorMessage(error: unknown, fallback = ""): string {
-  if (!(error instanceof Error)) return String(error || fallback);
+  if (!(error instanceof Error)) {
+    // A thrown non-Error (e.g. a plain object) would otherwise stringify to the
+    // useless "[object Object]". Surface its actual contents instead.
+    if (error && typeof error === "object") {
+      try {
+        const j = JSON.stringify(error);
+        if (j && j !== "{}") return j;
+      } catch {
+        /* circular / non-serializable — fall through */
+      }
+    }
+    return String(error || fallback);
+  }
   const e = error as Error & { status?: number; code?: string };
   const status = e.status ? "[HTTP " + e.status + "] " : "";
   const code = e.code ? " (" + e.code + ")" : "";
