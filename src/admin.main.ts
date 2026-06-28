@@ -1046,6 +1046,7 @@ const i18n = {
     coverMidNotFound: "No image found for that id.",
     r2CoverUnavail: "R2 is not available. Media files cannot be used.",
     slugReadonly: "Slug cannot be changed after creation.",
+    slugCopyHint: "Click to copy",
     slugHint:
       "Letters, numbers, hyphens, underscores only. Cannot be changed after creation.",
     articleTitlePlaceholder: "Enter article title",
@@ -1902,6 +1903,7 @@ const i18n = {
     coverMidNotFound: "そのIDの画像が見つかりません。",
     r2CoverUnavail: "R2 が使えないとメディアファイルは使えません。",
     slugReadonly: "Slug は変更できません",
+    slugCopyHint: "クリックでコピー",
     slugHint:
       "半角英数・ハイフン・アンダースコアのみ。作成後は変更できません。",
     articleTitlePlaceholder: "記事タイトルを入力",
