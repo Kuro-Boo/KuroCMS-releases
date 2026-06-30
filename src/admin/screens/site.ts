@@ -1407,6 +1407,35 @@ async function siteManagement() {
     }
 
     function previewTextForLang(lang: Dynamic) {
+      const code = String(lang || "en").toLowerCase();
+      const base = code.split("-")[0];
+      const samples: Record<string, string> = {
+        en: "Aa The quick brown",
+        ja: t("fontPreviewText"),
+        zh:
+          code === "zh-tw" || code === "zh-hk" || code.includes("hant")
+            ? "Aa 中文 漢字"
+            : "Aa 中文 汉字",
+        ko: "Aa 한글 가나다",
+        de: "Aa Ää Öö Üü ß",
+        fr: "Aa Éé Èè Çç Œœ",
+        es: "Aa Ññ ¿Qué tal?",
+        it: "Aa Èè Perché città",
+        pt: "Aa Ãã Çç São João",
+        nl: "Aa Ĳssel café",
+        pl: "Aa Ąą Łł Źź Żż",
+        tr: "Aa Çç Ğğ İı Şş",
+        ru: "Aa Привет Жж Яя",
+        uk: "Aa Україна їієґ",
+        ar: "Aa العربية",
+        fa: "Aa فارسی گچپژ",
+        hi: "Aa नमस्ते भारत",
+        th: "Aa สวัสดี ไทย",
+        vi: "Aa Tiếng Việt ăâđêôơư",
+        id: "Aa Bahasa Indonesia",
+      };
+      if (samples[code]) return samples[code];
+      if (samples[base]) return samples[base];
       switch (languageFontScript(lang)) {
         case "japanese":
           return t("fontPreviewText");
