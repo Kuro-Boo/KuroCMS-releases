@@ -13,13 +13,14 @@ import {
 } from "./templates/html-template";
 import { KE_VERSION } from "./admin-assets";
 import { buildFontHead, type LoadedFont } from "./fonts";
+import { findSystemFont } from "./templates/font-catalog";
 import type { Env } from "./types";
 
 // Bump when the page-rendering OUTPUT changes in a way the per-page source_hash
 // can't see (e.g. the <head> content-CSS <link>, template-model shape). The
 // build salts every page hash with this, so cached builds are invalidated and
 // all pages regenerate even when their underlying content is unchanged.
-const RENDER_FORMAT_VERSION = "13";
+const RENDER_FORMAT_VERSION = "14";
 
 /** Cheap, synchronous string hash (FNV-1a, base36) for cache keys. Not crypto. */
 function cheapHash(s: string): string {
@@ -1495,6 +1496,7 @@ export async function generatePage(
   const adminBase = adminAssetBase(env);
   let html = injectContentStyles(renderTemplate(sourceHtml, ctx), adminBase);
   html = injectFontHead(s, html, lang);
+  html = injectFontDebug(s, html, lang);
   html = injectSeoHead(html, s, ctx, pageLangs);
   html = injectGa4Head(html, s);
   return html;
@@ -1547,6 +1549,36 @@ function resolveFontConfig(
     /* ignore malformed config */
   }
   return { loaded, base };
+}
+
+function injectFontDebug(
+  settings: SettingsMap,
+  html: string,
+  lang: string,
+): string {
+  const cfg = resolveFontConfig(settings, lang);
+  const sys = findSystemFont(cfg.base);
+  const debug = {
+    lang,
+    base: sys ? sys.label : cfg.base || "",
+    checkFamily: sys || !cfg.base ? "" : cfg.base,
+  };
+  const script =
+    '<script id="kuro-font-debug-script">(function(){' +
+    "var cfg=" +
+    JSON.stringify(debug) +
+    ";" +
+    'function esc(s){return String(s||"")}' +
+    'function run(){var el=document.getElementById("kuro-font-debug");if(!el){el=document.createElement("div");el.id="kuro-font-debug";document.body.appendChild(el)}' +
+    'el.style.cssText="position:fixed;right:8px;bottom:8px;z-index:2147483647;max-width:min(520px,calc(100vw - 16px));padding:5px 8px;border:1px solid rgba(15,23,42,.22);border-radius:7px;background:rgba(255,255,255,.92);color:#0f172a;font:11px/1.35 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;box-shadow:0 4px 18px rgba(15,23,42,.14);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none";' +
+    'var computed="";try{computed=getComputedStyle(document.body).fontFamily||""}catch(e){}' +
+    'var status="system";if(cfg.checkFamily&&document.fonts&&document.fonts.check){try{status=document.fonts.check("16px \\"" + cfg.checkFamily.replace(/"/g,"\\\\\\"") + "\\"")?"loaded":"not-loaded"}catch(e){status="check-error"}}else if(cfg.checkFamily){status="unknown"}' +
+    'var text="Font["+esc(cfg.lang)+"]: "+(esc(cfg.base)||"(template)")+" / "+status;if(computed)text+=" | body: "+computed;el.textContent=text;el.title="KuroCMS font debug\\nconfigured: "+(esc(cfg.base)||"(template)")+"\\nstatus: "+status+"\\nbody: "+computed}' +
+    'if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",run);else run();' +
+    "})();</script>";
+  return html.includes("</body>")
+    ? html.replace("</body>", script + "</body>")
+    : html + script;
 }
 
 // ─── SEO / distribution <head> ────────────────────────────────────────────────
